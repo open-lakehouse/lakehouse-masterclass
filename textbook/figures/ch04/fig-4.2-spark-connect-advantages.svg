@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="56" fill="#f8fafc" font-size="36" font-weight="700" text-anchor="middle">Why Spark Connect — and the honest trade-offs</text>
+
+  <!-- advantages column -->
+  <text x="70" y="118" fill="#4ade80" font-size="24" font-weight="700">✓ Advantages</text>
+  <g font-size="16">
+    <g><rect x="70" y="140" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="168" fill="#d1fae5" font-weight="700">Thin client</text><text x="90" y="192" fill="#a7f3d0" font-size="14">no huge Spark JVM shipped — just a small client + gRPC</text></g>
+    <g><rect x="70" y="214" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="242" fill="#d1fae5" font-weight="700">Language &amp; version independence</text><text x="90" y="266" fill="#a7f3d0" font-size="14">client not pinned to server's Spark/JVM build; upgrade freely</text></g>
+    <g><rect x="70" y="288" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="316" fill="#d1fae5" font-weight="700">Connect from anywhere (sc://)</text><text x="90" y="340" fill="#a7f3d0" font-size="14">IDE, notebook, app, service — one URL, no jar packaging</text></g>
+    <g><rect x="70" y="362" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="390" fill="#d1fae5" font-weight="700">Stability &amp; isolation (headline win)</text><text x="90" y="414" fill="#a7f3d0" font-size="14">a crashing client can't kill the driver or other sessions</text></g>
+    <g><rect x="70" y="436" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="464" fill="#d1fae5" font-weight="700">Many concurrent isolated sessions</text><text x="90" y="488" fill="#a7f3d0" font-size="14">one server multiplexes users/apps sharing cluster compute</text></g>
+    <g><rect x="70" y="510" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="538" fill="#d1fae5" font-weight="700">Interactive dev + embeddable</text><text x="90" y="562" fill="#a7f3d0" font-size="14">fast local REPL vs real cluster; a backend holds a session remotely</text></g>
+    <g><rect x="70" y="584" width="560" height="66" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="1.5"/><text x="90" y="612" fill="#d1fae5" font-weight="700">Stable versioned API (protobuf)</text><text x="90" y="636" fill="#a7f3d0" font-size="14">enables non-JVM connectors and fwd/back compatibility</text></g>
+  </g>
+
+  <!-- trade-offs column -->
+  <text x="660" y="118" fill="#fbbf24" font-size="24" font-weight="700">△ Trade-offs (teach honestly)</text>
+  <g font-size="16">
+    <g><rect x="660" y="140" width="550" height="66" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="1.5"/><text x="680" y="168" fill="#fef3c7" font-weight="700">No RDD API / no SparkContext</text><text x="680" y="192" fill="#fde68a" font-size="14">the biggest gap — DataFrame/SQL only</text></g>
+    <g><rect x="660" y="214" width="550" height="66" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="1.5"/><text x="680" y="242" fill="#fef3c7" font-weight="700">UDF constraints</text><text x="680" y="266" fill="#fde68a" font-size="14">different serialization; client/server Python envs must match</text></g>
+    <g><rect x="660" y="288" width="550" height="66" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="1.5"/><text x="680" y="316" fill="#fef3c7" font-weight="700">Version-specific API gaps</text><text x="680" y="340" fill="#fde68a" font-size="14">streaming/ML added over 3.4→4.1 — verify per release</text></g>
+    <g><rect x="660" y="362" width="550" height="66" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="1.5"/><text x="680" y="390" fill="#fef3c7" font-weight="700">Debugging differs</text><text x="680" y="414" fill="#fde68a" font-size="14">errors as pyspark.errors...connect.*; last line is the useful one</text></g>
+    <g><rect x="660" y="436" width="550" height="66" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="1.5"/><text x="680" y="464" fill="#fef3c7" font-weight="700">CANNOT_MODIFY_STATIC_CONFIG</text><text x="680" y="488" fill="#fde68a" font-size="14">extensions, jars, warehouse, port → set server-side in conf</text></g>
+    <g><rect x="660" y="510" width="550" height="66" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="1.5"/><text x="680" y="538" fill="#fef3c7" font-weight="700">In-process-driver plugins</text><text x="680" y="562" fill="#fde68a" font-size="14">client SparkListener / spark._jvm interop won't work</text></g>
+  </g>
+
+  <text x="967" y="612" fill="#94a3b8" font-size="15" text-anchor="middle">For a modern lakehouse the</text>
+  <text x="967" y="634" fill="#94a3b8" font-size="15" text-anchor="middle">DataFrame/SQL/SDP surface is</text>
+  <text x="967" y="656" fill="#38bdf8" font-size="16" font-weight="700" text-anchor="middle">exactly what you use — Connect fits</text>
+</svg>

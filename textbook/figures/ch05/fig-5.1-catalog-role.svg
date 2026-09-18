@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="60" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">The catalog: one source of truth between engines and storage</text>
+
+  <!-- Engines row -->
+  <text x="640" y="120" fill="#94a3b8" font-size="18" text-anchor="middle">Engines ask the catalog by name</text>
+  <g>
+    <rect x="150" y="150" width="220" height="70" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="260" y="193" fill="#dbeafe" font-size="20" font-weight="700" text-anchor="middle">Spark (sc://)</text>
+    <rect x="530" y="150" width="220" height="70" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="640" y="193" fill="#dbeafe" font-size="20" font-weight="700" text-anchor="middle">DuckDB</text>
+    <rect x="910" y="150" width="220" height="70" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="1020" y="193" fill="#dbeafe" font-size="20" font-weight="700" text-anchor="middle">Trino / DataFusion</text>
+  </g>
+
+  <!-- arrows engines -> catalog -->
+  <g stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arr)">
+    <path d="M260 220 L520 300"/>
+    <path d="M640 220 L640 300"/>
+    <path d="M1020 220 L760 300"/>
+  </g>
+
+  <!-- Catalog box -->
+  <rect x="360" y="305" width="560" height="120" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+  <text x="640" y="345" fill="#fde68a" font-size="24" font-weight="700" text-anchor="middle">Unity Catalog OSS</text>
+  <text x="640" y="378" fill="#fef3c7" font-size="16" text-anchor="middle">name  →  current metadata pointer  →  file locations</text>
+  <text x="640" y="405" fill="#fbbf24" font-size="15" text-anchor="middle" font-family="monospace">/api/2.1/unity-catalog/iceberg</text>
+
+  <!-- arrow catalog -> storage -->
+  <path d="M640 425 L640 500" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arr)"/>
+  <text x="670" y="470" fill="#94a3b8" font-size="15">engines read data files directly</text>
+
+  <!-- Storage -->
+  <rect x="300" y="505" width="680" height="150" rx="16" fill="#0c3b40" stroke="#22d3ee" stroke-width="3"/>
+  <text x="640" y="545" fill="#a5f3fc" font-size="22" font-weight="700" text-anchor="middle">Object storage (S3 API)</text>
+  <g>
+    <rect x="340" y="565" width="120" height="60" rx="8" fill="#155e63" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="400" y="600" fill="#cffafe" font-size="13" text-anchor="middle">data.parquet</text>
+    <rect x="480" y="565" width="120" height="60" rx="8" fill="#155e63" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="540" y="600" fill="#cffafe" font-size="13" text-anchor="middle">data.parquet</text>
+    <rect x="620" y="565" width="140" height="60" rx="8" fill="#155e63" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="690" y="600" fill="#cffafe" font-size="13" text-anchor="middle">metadata.json</text>
+    <rect x="780" y="565" width="160" height="60" rx="8" fill="#155e63" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="860" y="600" fill="#cffafe" font-size="13" text-anchor="middle">manifest.avro</text>
+  </g>
+
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+</svg>

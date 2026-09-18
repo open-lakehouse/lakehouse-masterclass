@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="60" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">The medallion: refine forward, Bronze → Silver → Gold</text>
+
+  <!-- Bronze -->
+  <rect x="90" y="180" width="320" height="240" rx="18" fill="#3a2410" stroke="#d97706" stroke-width="3"/>
+  <circle cx="140" cy="222" r="16" fill="#d97706"/>
+  <text x="250" y="228" fill="#fed7aa" font-size="26" font-weight="700" text-anchor="middle">BRONZE</text>
+  <text x="250" y="268" fill="#fdba74" font-size="17" text-anchor="middle">raw · faithful landing</text>
+  <text x="250" y="300" fill="#fdba74" font-size="15" text-anchor="middle">exactly as it arrived</text>
+  <text x="250" y="326" fill="#fdba74" font-size="15" text-anchor="middle">never edited</text>
+  <text x="250" y="372" fill="#94a3b8" font-size="14" text-anchor="middle" font-family="monospace">bronze.orders_raw</text>
+
+  <!-- Silver -->
+  <rect x="480" y="180" width="320" height="240" rx="18" fill="#1e293b" stroke="#cbd5e1" stroke-width="3"/>
+  <circle cx="530" cy="222" r="16" fill="#cbd5e1"/>
+  <text x="640" y="228" fill="#f1f5f9" font-size="26" font-weight="700" text-anchor="middle">SILVER</text>
+  <text x="640" y="268" fill="#e2e8f0" font-size="17" text-anchor="middle">cleaned · conformed</text>
+  <text x="640" y="300" fill="#e2e8f0" font-size="15" text-anchor="middle">deduped, typed, filtered</text>
+  <text x="640" y="326" fill="#e2e8f0" font-size="15" text-anchor="middle">one trustworthy row/event</text>
+  <text x="640" y="372" fill="#94a3b8" font-size="14" text-anchor="middle" font-family="monospace">silver.orders</text>
+
+  <!-- Gold -->
+  <rect x="870" y="180" width="320" height="240" rx="18" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+  <circle cx="920" cy="222" r="16" fill="#fbbf24"/>
+  <text x="1030" y="228" fill="#fef3c7" font-size="26" font-weight="700" text-anchor="middle">GOLD</text>
+  <text x="1030" y="268" fill="#fde68a" font-size="17" text-anchor="middle">business-ready</text>
+  <text x="1030" y="300" fill="#fde68a" font-size="15" text-anchor="middle">aggregated · joined · modeled</text>
+  <text x="1030" y="326" fill="#fde68a" font-size="15" text-anchor="middle">what dashboards/models read</text>
+  <text x="1030" y="372" fill="#94a3b8" font-size="14" text-anchor="middle" font-family="monospace">gold.daily_revenue</text>
+
+  <!-- arrows with quality gates -->
+  <g stroke="#4ade80" stroke-width="3" fill="none" marker-end="url(#a7)">
+    <path d="M410 300 L478 300"/>
+    <path d="M800 300 L868 300"/>
+  </g>
+  <text x="444" y="285" fill="#4ade80" font-size="13" text-anchor="middle">DQ gate</text>
+  <text x="834" y="285" fill="#4ade80" font-size="13" text-anchor="middle">aggregate</text>
+
+  <text x="640" y="500" fill="#94a3b8" font-size="17" text-anchor="middle">Each tier reads the one below it. A logic change re-derives Silver/Gold from untouched Bronze —</text>
+  <text x="640" y="528" fill="#94a3b8" font-size="17" text-anchor="middle">you never re-fetch the source.</text>
+
+  <defs>
+    <marker id="a7" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#4ade80"/>
+    </marker>
+  </defs>
+</svg>

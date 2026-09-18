@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">The medallion as an Airflow DAG</text>
+  <text x="640" y="96" fill="#fb923c" font-size="18" text-anchor="middle">schedule: @daily · retries: 2 · runs in dependency order</text>
+
+  <!-- tasks -->
+  <g>
+    <rect x="120" y="250" width="260" height="120" rx="16" fill="#3a2410" stroke="#d97706" stroke-width="3"/>
+    <text x="250" y="300" fill="#fed7aa" font-size="22" font-weight="700" text-anchor="middle">ingest_bronze</text>
+    <text x="250" y="332" fill="#fdba74" font-size="14" text-anchor="middle">land raw orders</text>
+    <text x="250" y="354" fill="#fdba74" font-size="13" text-anchor="middle">(Ch 6)</text>
+
+    <rect x="510" y="250" width="260" height="120" rx="16" fill="#1e293b" stroke="#cbd5e1" stroke-width="3"/>
+    <text x="640" y="300" fill="#f1f5f9" font-size="22" font-weight="700" text-anchor="middle">build_silver</text>
+    <text x="640" y="332" fill="#e2e8f0" font-size="14" text-anchor="middle">clean &amp; conform</text>
+    <text x="640" y="354" fill="#e2e8f0" font-size="13" text-anchor="middle">(SDP, Ch 7)</text>
+
+    <rect x="900" y="250" width="260" height="120" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+    <text x="1030" y="300" fill="#fef3c7" font-size="22" font-weight="700" text-anchor="middle">build_gold</text>
+    <text x="1030" y="332" fill="#fde68a" font-size="14" text-anchor="middle">aggregate</text>
+    <text x="1030" y="354" fill="#fde68a" font-size="13" text-anchor="middle">(SDP, Ch 7)</text>
+  </g>
+
+  <!-- dependency edges -->
+  <g stroke="#fb923c" stroke-width="3" fill="none" marker-end="url(#a9)">
+    <path d="M380 310 L508 310"/>
+    <path d="M770 310 L898 310"/>
+  </g>
+  <text x="444" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
+  <text x="834" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
+
+  <!-- retry annotation -->
+  <g>
+    <path d="M640 250 C 590 200 690 200 640 250" stroke="#4ade80" stroke-width="2" fill="none" marker-end="url(#a9g)"/>
+    <text x="640" y="195" fill="#4ade80" font-size="13" text-anchor="middle">↻ retry x2 on transient failure</text>
+  </g>
+
+  <!-- failure semantics -->
+  <text x="640" y="460" fill="#94a3b8" font-size="17" text-anchor="middle">If a task fails after its retries, its downstream tasks do not run —</text>
+  <text x="640" y="488" fill="#94a3b8" font-size="17" text-anchor="middle">Airflow marks the run failed and shows you exactly where it stopped.</text>
+
+  <text x="640" y="560" fill="#64748b" font-size="15" text-anchor="middle">Directed + Acyclic: work flows one way and never loops. Airflow derives order &amp; parallelism.</text>
+
+  <defs>
+    <marker id="a9" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#fb923c"/></marker>
+    <marker id="a9g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#4ade80"/></marker>
+  </defs>
+</svg>

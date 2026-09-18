@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="60" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">Data quality declared on the table</text>
+
+  <!-- incoming rows -->
+  <text x="180" y="130" fill="#94a3b8" font-size="18" text-anchor="middle">Bronze rows</text>
+  <g font-family="monospace" font-size="14">
+    <rect x="60" y="150" width="240" height="44" rx="8" fill="#0f3d2e" stroke="#4ade80" stroke-width="1.5"/>
+    <text x="80" y="178" fill="#d1fae5">o-1001 · amount 42.5</text>
+    <rect x="60" y="206" width="240" height="44" rx="8" fill="#3f1d1d" stroke="#f87171" stroke-width="1.5"/>
+    <text x="80" y="234" fill="#fecaca">o-1002 · amount -5.0</text>
+    <rect x="60" y="262" width="240" height="44" rx="8" fill="#0f3d2e" stroke="#4ade80" stroke-width="1.5"/>
+    <text x="80" y="290" fill="#d1fae5">o-1003 · amount 88.0</text>
+    <rect x="60" y="318" width="240" height="44" rx="8" fill="#3f1d1d" stroke="#f87171" stroke-width="1.5"/>
+    <text x="80" y="346" fill="#fecaca">NULL   · amount 12.0</text>
+  </g>
+
+  <!-- expectation gate -->
+  <rect x="440" y="180" width="360" height="200" rx="16" fill="#2e1f47" stroke="#a78bfa" stroke-width="3"/>
+  <text x="620" y="215" fill="#ddd6fe" font-size="20" font-weight="700" text-anchor="middle">Declared expectations</text>
+  <text x="620" y="255" fill="#c4b5fd" font-size="15" text-anchor="middle" font-family="monospace">expect_or_drop("valid_amount",</text>
+  <text x="620" y="278" fill="#c4b5fd" font-size="15" text-anchor="middle" font-family="monospace">  "amount &gt; 0")</text>
+  <text x="620" y="312" fill="#c4b5fd" font-size="15" text-anchor="middle" font-family="monospace">expect_or_drop("has_id",</text>
+  <text x="620" y="335" fill="#c4b5fd" font-size="15" text-anchor="middle" font-family="monospace">  "order_id IS NOT NULL")</text>
+  <text x="620" y="368" fill="#a78bfa" font-size="13" text-anchor="middle">drop · warn · or fail the run</text>
+
+  <!-- clean output -->
+  <text x="1080" y="130" fill="#94a3b8" font-size="18" text-anchor="middle">Silver (clean)</text>
+  <g font-family="monospace" font-size="14">
+    <rect x="960" y="200" width="240" height="44" rx="8" fill="#0f3d2e" stroke="#4ade80" stroke-width="2"/>
+    <text x="980" y="228" fill="#d1fae5">o-1001 · amount 42.5</text>
+    <rect x="960" y="256" width="240" height="44" rx="8" fill="#0f3d2e" stroke="#4ade80" stroke-width="2"/>
+    <text x="980" y="284" fill="#d1fae5">o-1003 · amount 88.0</text>
+  </g>
+
+  <g stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#a72)">
+    <path d="M300 250 L438 250"/>
+    <path d="M800 250 L958 250"/>
+  </g>
+
+  <text x="640" y="470" fill="#94a3b8" font-size="17" text-anchor="middle">The two invalid rows (negative amount, null id) are dropped — only trustworthy rows reach Silver.</text>
+  <text x="640" y="500" fill="#64748b" font-size="15" text-anchor="middle">Rules live with the table definition: visible, versioned, enforced every run.</text>
+
+  <defs>
+    <marker id="a72" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+</svg>

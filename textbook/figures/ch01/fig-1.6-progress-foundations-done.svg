@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="360" fill="#0f172a"/>
+  <text x="640" y="48" fill="#f8fafc" font-size="28" font-weight="700" text-anchor="middle">Progress — Foundations complete</text>
+
+  <!-- Foundations chip: checked -->
+  <g>
+    <rect x="40" y="90" width="150" height="70" rx="10" fill="#0f3d2e" stroke="#4ade80" stroke-width="3"/>
+    <circle cx="70" cy="125" r="15" fill="#22c55e"/>
+    <path d="M63 125 l6 6 l10 -13" fill="none" stroke="#0f172a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="118" y="131" fill="#d1fae5" font-size="18" font-weight="700" text-anchor="middle">Foundations</text>
+  </g>
+
+  <text x="212" y="132" fill="#475569" font-size="24">→</text>
+
+  <!-- Setup chip: NEXT (highlighted) -->
+  <g>
+    <rect x="240" y="90" width="150" height="70" rx="10" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+    <text x="315" y="122" fill="#fef3c7" font-size="18" font-weight="700" text-anchor="middle">Setup</text>
+    <text x="315" y="146" fill="#fbbf24" font-size="13" text-anchor="middle">◀ you are here next</text>
+  </g>
+
+  <!-- remaining layers dimmed -->
+  <g font-size="14" text-anchor="middle" fill="#64748b">
+    <rect x="410" y="98" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="469" y="130">Storage</text>
+    <rect x="540" y="98" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="599" y="130">Compute</text>
+    <rect x="670" y="98" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="729" y="124">Tables &amp;</text><text x="729" y="142">Catalog</text>
+    <rect x="800" y="98" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="859" y="130">Ingestion</text>
+    <rect x="930" y="98" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="989" y="130">Transform</text>
+    <rect x="1060" y="98" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="1119" y="130">Streaming</text>
+    <rect x="410" y="170" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="469" y="202">Orchestr.</text>
+    <rect x="540" y="170" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="599" y="202">Serving</text>
+    <rect x="670" y="170" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="729" y="202">AI</text>
+    <rect x="800" y="170" width="118" height="54" rx="8" fill="#1e293b" stroke="#334155"/><text x="859" y="202">Agents</text>
+  </g>
+
+  <text x="640" y="300" fill="#94a3b8" font-size="16" text-anchor="middle">1 of 11 milestones done — next up: install prerequisites and bring up the environment</text>
+</svg>

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">Batch and streaming — two paths into one Bronze table</text>
+
+  <!-- BATCH path (top) -->
+  <text x="80" y="150" fill="#3b82f6" font-size="24" font-weight="700">BATCH — bounded, scheduled</text>
+  <g>
+    <rect x="80" y="175" width="150" height="64" rx="10" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
+    <text x="155" y="213" fill="#e2e8f0" font-size="15" text-anchor="middle">raw files</text>
+    <rect x="300" y="175" width="200" height="64" rx="10" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="400" y="205" fill="#dbeafe" font-size="15" text-anchor="middle" font-weight="700">Spark batch job</text>
+    <text x="400" y="226" fill="#93c5fd" font-size="12" text-anchor="middle">runs, then finishes</text>
+  </g>
+  <g font-size="12" fill="#64748b">
+    <rect x="80" y="250" width="24" height="18" rx="3" fill="#1e3a5f" stroke="#3b82f6"/>
+    <rect x="112" y="250" width="24" height="18" rx="3" fill="#1e3a5f" stroke="#3b82f6"/>
+    <rect x="144" y="250" width="24" height="18" rx="3" fill="#1e3a5f" stroke="#3b82f6"/>
+    <text x="180" y="264">one chunk / day</text>
+  </g>
+  <path d="M500 207 C 620 207 640 330 758 350" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#a8)"/>
+
+  <!-- STREAMING path (bottom) -->
+  <text x="80" y="470" fill="#4ade80" font-size="24" font-weight="700">STREAMING — unbounded, continuous</text>
+  <g>
+    <rect x="80" y="495" width="180" height="64" rx="10" fill="#3a2410" stroke="#d97706" stroke-width="2.5"/>
+    <text x="170" y="525" fill="#fed7aa" font-size="15" text-anchor="middle" font-weight="700">Kafka topic</text>
+    <text x="170" y="546" fill="#fdba74" font-size="12" text-anchor="middle">orders · :9092</text>
+    <rect x="330" y="495" width="230" height="64" rx="10" fill="#0f3d2e" stroke="#4ade80" stroke-width="2.5"/>
+    <text x="445" y="525" fill="#d1fae5" font-size="15" text-anchor="middle" font-weight="700">Structured Streaming</text>
+    <text x="445" y="546" fill="#a7f3d0" font-size="12" text-anchor="middle">watermark · dedup · runs forever</text>
+  </g>
+  <g>
+    <circle cx="90" cy="470" r="5" fill="#d97706"/>
+    <circle cx="120" cy="470" r="5" fill="#d97706"/>
+    <circle cx="150" cy="470" r="5" fill="#d97706"/>
+    <circle cx="180" cy="470" r="5" fill="#d97706"/>
+    <text x="230" y="475" fill="#64748b" font-size="12">event · event · event …</text>
+  </g>
+  <path d="M560 527 C 660 527 660 400 758 380" stroke="#4ade80" stroke-width="2.5" fill="none" marker-end="url(#a8g)"/>
+
+  <!-- shared Bronze -->
+  <rect x="760" y="320" width="420" height="90" rx="16" fill="#3a2410" stroke="#d97706" stroke-width="3"/>
+  <text x="970" y="358" fill="#fed7aa" font-size="24" font-weight="700" text-anchor="middle">BRONZE</text>
+  <text x="970" y="388" fill="#fdba74" font-size="15" text-anchor="middle" font-family="monospace">iceberg.bronze.orders_raw</text>
+
+  <text x="640" y="640" fill="#94a3b8" font-size="17" text-anchor="middle">Same destination, different how. Choose streaming for freshness; batch for simplicity.</text>
+
+  <defs>
+    <marker id="a8" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#3b82f6"/></marker>
+    <marker id="a8g" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#4ade80"/></marker>
+  </defs>
+</svg>

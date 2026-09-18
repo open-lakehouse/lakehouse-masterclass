@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 360" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="360" fill="#0f172a"/>
+  <text x="640" y="52" fill="#f8fafc" font-size="30" font-weight="700" text-anchor="middle">One order event's journey through the stack</text>
+  <text x="640" y="84" fill="#94a3b8" font-size="17" text-anchor="middle">The through-line: a single e-commerce dataset, built once, across every layer</text>
+
+  <defs>
+    <marker id="j-arrow" markerWidth="14" markerHeight="14" refX="7" refY="7" orient="auto">
+      <path d="M0 0 L14 7 L0 14 z" fill="#facc15"/>
+    </marker>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="50%" stop-color="#fb923c"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ribbon -->
+  <rect x="60" y="188" width="1160" height="14" rx="7" fill="url(#ribbon)" opacity="0.35"/>
+
+  <!-- stages -->
+  <g text-anchor="middle">
+    <!-- source -->
+    <g><circle cx="120" cy="195" r="30" fill="#1e293b" stroke="#64748b" stroke-width="2"/><text x="120" y="201" fill="#e2e8f0" font-size="22">🛒</text><text x="120" y="258" fill="#cbd5e1" font-size="14">order placed</text><text x="120" y="278" fill="#64748b" font-size="12">source</text></g>
+    <!-- ingest -->
+    <g><rect x="220" y="168" width="120" height="54" rx="10" fill="#3b2f63" stroke="#a78bfa" stroke-width="2"/><text x="280" y="192" fill="#ede9fe" font-size="15" font-weight="700">Ingestion</text><text x="280" y="212" fill="#c4b5fd" font-size="12">raw → Bronze</text></g>
+    <!-- transform -->
+    <g><rect x="372" y="168" width="140" height="54" rx="10" fill="#3b2f63" stroke="#a78bfa" stroke-width="2"/><text x="442" y="192" fill="#ede9fe" font-size="15" font-weight="700">Transform</text><text x="442" y="212" fill="#c4b5fd" font-size="12">Bronze→Silver→Gold</text></g>
+    <!-- orchestrate -->
+    <g><rect x="544" y="168" width="130" height="54" rx="10" fill="#3f2d1a" stroke="#fb923c" stroke-width="2"/><text x="609" y="192" fill="#ffedd5" font-size="15" font-weight="700">Orchestrate</text><text x="609" y="212" fill="#fed7aa" font-size="12">scheduled DAG</text></g>
+    <!-- serve -->
+    <g><rect x="706" y="168" width="120" height="54" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="2"/><text x="766" y="192" fill="#d1fae5" font-size="15" font-weight="700">Serve</text><text x="766" y="212" fill="#a7f3d0" font-size="12">DuckDB query</text></g>
+    <!-- AI -->
+    <g><rect x="858" y="168" width="120" height="54" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="2"/><text x="918" y="192" fill="#d1fae5" font-size="15" font-weight="700">AI</text><text x="918" y="212" fill="#a7f3d0" font-size="12">train a model</text></g>
+    <!-- Agent -->
+    <g><rect x="1010" y="168" width="150" height="54" rx="10" fill="#0f3d2e" stroke="#34d399" stroke-width="2"/><text x="1085" y="192" fill="#d1fae5" font-size="15" font-weight="700">Agent</text><text x="1085" y="212" fill="#a7f3d0" font-size="12">operates it all</text></g>
+  </g>
+
+  <!-- flow arrows -->
+  <g stroke="#facc15" stroke-width="3">
+    <line x1="152" y1="195" x2="216" y2="195" marker-end="url(#j-arrow)"/>
+    <line x1="342" y1="195" x2="368" y2="195" marker-end="url(#j-arrow)"/>
+    <line x1="514" y1="195" x2="540" y2="195" marker-end="url(#j-arrow)"/>
+    <line x1="676" y1="195" x2="702" y2="195" marker-end="url(#j-arrow)"/>
+    <line x1="828" y1="195" x2="854" y2="195" marker-end="url(#j-arrow)"/>
+    <line x1="980" y1="195" x2="1006" y2="195" marker-end="url(#j-arrow)"/>
+  </g>
+
+  <text x="640" y="330" fill="#facc15" font-size="16" font-weight="600" text-anchor="middle">Every chapter adds exactly one stop on this journey</text>
+</svg>
