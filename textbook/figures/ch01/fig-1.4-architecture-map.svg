@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="56" fill="#f8fafc" font-size="38" font-weight="700" text-anchor="middle">The Open Lakehouse — Architecture Map</text>
+  <text x="640" y="90" fill="#94a3b8" font-size="19" text-anchor="middle">Built bottom-up: each layer consumes the one beneath it</text>
+
+  <!-- Base: Storage -->
+  <rect x="120" y="600" width="1040" height="70" rx="12" fill="#164e63" stroke="#22d3ee" stroke-width="2"/>
+  <text x="150" y="632" fill="#e0f2fe" font-size="22" font-weight="700">1 · Storage</text>
+  <text x="150" y="656" fill="#a5f3fc" font-size="16">SeaweedFS (S3 API) — holds every data file cheaply</text>
+
+  <!-- Compute + Tables side by side -->
+  <rect x="120" y="512" width="510" height="72" rx="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+  <text x="150" y="544" fill="#dbeafe" font-size="22" font-weight="700">2 · Compute</text>
+  <text x="150" y="568" fill="#bfdbfe" font-size="15">Spark 4.x via Spark Connect (sc://) — thin remote client</text>
+
+  <rect x="650" y="512" width="510" height="72" rx="12" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+  <text x="680" y="544" fill="#dbeafe" font-size="22" font-weight="700">3 · Tables &amp; Catalog</text>
+  <text x="680" y="568" fill="#bfdbfe" font-size="15">Iceberg + Unity Catalog OSS — files behave as tables</text>
+
+  <!-- Data-flow layers -->
+  <rect x="120" y="424" width="330" height="72" rx="12" fill="#3b2f63" stroke="#a78bfa" stroke-width="2"/>
+  <text x="150" y="456" fill="#ede9fe" font-size="21" font-weight="700">4 · Ingestion</text>
+  <text x="150" y="480" fill="#ddd6fe" font-size="14">land raw data → Bronze</text>
+
+  <rect x="475" y="424" width="330" height="72" rx="12" fill="#3b2f63" stroke="#a78bfa" stroke-width="2"/>
+  <text x="505" y="456" fill="#ede9fe" font-size="21" font-weight="700">5 · Transformation</text>
+  <text x="505" y="480" fill="#ddd6fe" font-size="14">SDP: Bronze → Silver → Gold</text>
+
+  <rect x="830" y="424" width="330" height="72" rx="12" fill="#3b2f63" stroke="#a78bfa" stroke-width="2"/>
+  <text x="860" y="456" fill="#ede9fe" font-size="21" font-weight="700">6 · Streaming</text>
+  <text x="860" y="480" fill="#ddd6fe" font-size="14">Kafka + Structured Streaming</text>
+
+  <!-- Orchestration spanning -->
+  <rect x="120" y="336" width="1040" height="72" rx="12" fill="#3f2d1a" stroke="#fb923c" stroke-width="2"/>
+  <text x="150" y="368" fill="#ffedd5" font-size="22" font-weight="700">7 · Orchestration</text>
+  <text x="150" y="392" fill="#fed7aa" font-size="16">Apache Airflow — schedules &amp; wires every pipeline above into DAGs</text>
+
+  <!-- Top layers -->
+  <rect x="120" y="248" width="330" height="72" rx="12" fill="#0f3d2e" stroke="#34d399" stroke-width="2"/>
+  <text x="150" y="280" fill="#d1fae5" font-size="21" font-weight="700">8 · Serving</text>
+  <text x="150" y="304" fill="#a7f3d0" font-size="14">Unity Catalog OSS (any engine)</text>
+
+  <rect x="475" y="248" width="330" height="72" rx="12" fill="#0f3d2e" stroke="#34d399" stroke-width="2"/>
+  <text x="505" y="280" fill="#d1fae5" font-size="21" font-weight="700">9 · AI</text>
+  <text x="505" y="304" fill="#a7f3d0" font-size="14">MLflow — train · track · register</text>
+
+  <rect x="830" y="248" width="330" height="72" rx="12" fill="#0f3d2e" stroke="#34d399" stroke-width="2"/>
+  <text x="860" y="280" fill="#d1fae5" font-size="21" font-weight="700">10 · Agents</text>
+  <text x="860" y="304" fill="#a7f3d0" font-size="14">LLM drives the ./lakehouse CLI</text>
+
+  <!-- The dataset ribbon label -->
+  <text x="640" y="168" fill="#f8fafc" font-size="19" font-weight="600" text-anchor="middle">One dataset — e-commerce order events — flows up through every layer</text>
+  <path d="M640 182 v52" stroke="#facc15" stroke-width="3" marker-end="url(#arrow)"/>
+  <defs>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="6" refY="6" orient="auto">
+      <path d="M0 0 L12 6 L0 12 z" fill="#facc15"/>
+    </marker>
+  </defs>
+
+  <!-- upward build arrow on the left gutter -->
+  <text x="70" y="640" fill="#64748b" font-size="14" text-anchor="middle" transform="rotate(-90 70 430)">build order  →  bottom-up</text>
+</svg>

@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">The lakehouse feeds AI — and MLflow tracks it</text>
+
+  <!-- Gold -->
+  <rect x="70" y="250" width="240" height="130" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+  <text x="190" y="300" fill="#fef3c7" font-size="22" font-weight="700" text-anchor="middle">GOLD table</text>
+  <text x="190" y="332" fill="#fde68a" font-size="14" text-anchor="middle">clean · versioned</text>
+  <text x="190" y="354" fill="#94a3b8" font-size="13" text-anchor="middle" font-family="monospace">gold.daily_revenue</text>
+
+  <!-- training data -->
+  <rect x="390" y="250" width="230" height="130" rx="16" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+  <text x="505" y="300" fill="#dbeafe" font-size="20" font-weight="700" text-anchor="middle">training data</text>
+  <text x="505" y="332" fill="#93c5fd" font-size="14" text-anchor="middle">features + target</text>
+  <text x="505" y="354" fill="#93c5fd" font-size="13" text-anchor="middle">read over sc://</text>
+
+  <!-- model -->
+  <rect x="700" y="250" width="230" height="130" rx="16" fill="#0f3d2e" stroke="#4ade80" stroke-width="2.5"/>
+  <text x="815" y="300" fill="#d1fae5" font-size="20" font-weight="700" text-anchor="middle">model</text>
+  <text x="815" y="332" fill="#a7f3d0" font-size="14" text-anchor="middle">fit / train</text>
+  <text x="815" y="354" fill="#a7f3d0" font-size="13" text-anchor="middle">predict order_count</text>
+
+  <g stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#a11)">
+    <path d="M310 315 L388 315"/>
+    <path d="M620 315 L698 315"/>
+  </g>
+
+  <!-- MLflow -->
+  <rect x="1000" y="200" width="220" height="230" rx="16" fill="#2e1f47" stroke="#a78bfa" stroke-width="3"/>
+  <text x="1110" y="240" fill="#ddd6fe" font-size="22" font-weight="700" text-anchor="middle">MLflow</text>
+  <text x="1110" y="278" fill="#c4b5fd" font-size="14" text-anchor="middle">tracking</text>
+  <text x="1110" y="300" fill="#ede9fe" font-size="12" text-anchor="middle">params · metrics</text>
+  <text x="1110" y="320" fill="#ede9fe" font-size="12" text-anchor="middle">+ snapshot_id</text>
+  <line x1="1020" y1="338" x2="1200" y2="338" stroke="#5b4a86" stroke-width="1.5"/>
+  <text x="1110" y="366" fill="#c4b5fd" font-size="14" text-anchor="middle">registry</text>
+  <text x="1110" y="388" fill="#ede9fe" font-size="12" text-anchor="middle">versioned models</text>
+  <text x="1110" y="408" fill="#ede9fe" font-size="12" text-anchor="middle">promote / roll back</text>
+
+  <path d="M815 250 C 900 160 960 180 1030 200" stroke="#a78bfa" stroke-width="2.5" fill="none" marker-end="url(#a11p)"/>
+  <text x="930" y="150" fill="#a78bfa" font-size="13" text-anchor="middle">log run + model</text>
+
+  <text x="640" y="520" fill="#94a3b8" font-size="17" text-anchor="middle">Logging the Gold snapshot id ties the model to the exact data that trained it —</text>
+  <text x="640" y="548" fill="#94a3b8" font-size="17" text-anchor="middle">data versioning (Iceberg) + model versioning (MLflow) = full reproducibility.</text>
+
+  <defs>
+    <marker id="a11" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/></marker>
+    <marker id="a11p" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#a78bfa"/></marker>
+  </defs>
+</svg>

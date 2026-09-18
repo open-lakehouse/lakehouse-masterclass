@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="56" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">An Iceberg table is a metadata tree, not just files</text>
+
+  <!-- Left: the tree -->
+  <text x="340" y="110" fill="#94a3b8" font-size="18" text-anchor="middle">Current state (one snapshot)</text>
+
+  <rect x="200" y="130" width="280" height="66" rx="12" fill="#3f2d1a" stroke="#fbbf24" stroke-width="2.5"/>
+  <text x="340" y="163" fill="#fde68a" font-size="18" font-weight="700" text-anchor="middle">Catalog entry</text>
+  <text x="340" y="184" fill="#fef3c7" font-size="13" text-anchor="middle">points to current metadata</text>
+
+  <path d="M340 196 L340 236" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arr2)"/>
+
+  <rect x="200" y="240" width="280" height="66" rx="12" fill="#312e5f" stroke="#a78bfa" stroke-width="2.5"/>
+  <text x="340" y="273" fill="#ddd6fe" font-size="18" font-weight="700" text-anchor="middle">metadata.json</text>
+  <text x="340" y="294" fill="#ede9fe" font-size="13" text-anchor="middle">schema + snapshot list</text>
+
+  <path d="M340 306 L340 346" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arr2)"/>
+
+  <rect x="200" y="350" width="280" height="66" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+  <text x="340" y="383" fill="#dbeafe" font-size="18" font-weight="700" text-anchor="middle">manifest list → manifests</text>
+  <text x="340" y="404" fill="#dbeafe" font-size="13" text-anchor="middle">which data files belong</text>
+
+  <path d="M340 416 L340 456" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arr2)"/>
+
+  <rect x="200" y="460" width="280" height="66" rx="12" fill="#0c3b40" stroke="#22d3ee" stroke-width="2.5"/>
+  <text x="340" y="493" fill="#a5f3fc" font-size="18" font-weight="700" text-anchor="middle">data files (Parquet)</text>
+  <text x="340" y="514" fill="#cffafe" font-size="13" text-anchor="middle">immutable, in object storage</text>
+
+  <!-- Right: snapshots over time -->
+  <text x="900" y="110" fill="#94a3b8" font-size="18" text-anchor="middle">Every write adds a snapshot (nothing mutated)</text>
+
+  <g>
+    <rect x="700" y="150" width="400" height="70" rx="12" fill="#0f3d2e" stroke="#4ade80" stroke-width="2.5"/>
+    <text x="720" y="178" fill="#d1fae5" font-size="16" font-weight="700" text-anchor="start">Snapshot 1</text>
+    <text x="720" y="202" fill="#a7f3d0" font-size="13" text-anchor="start">INSERT 3 rows · 09:12</text>
+
+    <rect x="700" y="245" width="400" height="70" rx="12" fill="#0f3d2e" stroke="#4ade80" stroke-width="2.5"/>
+    <text x="720" y="273" fill="#d1fae5" font-size="16" font-weight="700" text-anchor="start">Snapshot 2</text>
+    <text x="720" y="297" fill="#a7f3d0" font-size="13" text-anchor="start">ADD COLUMN channel + INSERT · 10:00</text>
+
+    <rect x="700" y="340" width="400" height="70" rx="12" fill="#3f1d1d" stroke="#f87171" stroke-width="2.5"/>
+    <text x="720" y="368" fill="#fecaca" font-size="16" font-weight="700" text-anchor="start">Snapshot 3</text>
+    <text x="720" y="392" fill="#fca5a5" font-size="13" text-anchor="start">DELETE everything (a mistake!)</text>
+
+    <rect x="700" y="435" width="400" height="70" rx="12" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+    <text x="720" y="463" fill="#fde68a" font-size="16" font-weight="700" text-anchor="start">rollback_to_snapshot(2)</text>
+    <text x="720" y="487" fill="#fef3c7" font-size="13" text-anchor="start">time travel undoes the mistake</text>
+  </g>
+
+  <path d="M900 220 L900 245" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arr2)"/>
+  <path d="M900 315 L900 340" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#arr2)"/>
+  <path d="M1120 375 C 1180 375 1180 470 1110 470" stroke="#fbbf24" stroke-width="2.5" fill="none" stroke-dasharray="6 5" marker-end="url(#arrY)"/>
+
+  <text x="640" y="560" fill="#64748b" font-size="15" text-anchor="middle">Readers see one consistent snapshot · concurrent writers don't corrupt each other · old snapshots enable rollback</text>
+
+  <defs>
+    <marker id="arr2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+    <marker id="arrY" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#fbbf24"/>
+    </marker>
+  </defs>
+</svg>

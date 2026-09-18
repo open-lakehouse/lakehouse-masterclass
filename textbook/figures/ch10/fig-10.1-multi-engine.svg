@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">One open catalog, many engines — no copies</text>
+
+  <!-- engines row -->
+  <g>
+    <rect x="90" y="130" width="230" height="80" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="205" y="167" fill="#dbeafe" font-size="19" font-weight="700" text-anchor="middle">Spark (writer)</text>
+    <text x="205" y="191" fill="#93c5fd" font-size="13" text-anchor="middle">sc:// Connect</text>
+
+    <rect x="360" y="130" width="230" height="80" rx="12" fill="#0f3d2e" stroke="#4ade80" stroke-width="2.5"/>
+    <text x="475" y="167" fill="#d1fae5" font-size="19" font-weight="700" text-anchor="middle">DuckDB</text>
+    <text x="475" y="191" fill="#a7f3d0" font-size="13" text-anchor="middle">optional</text>
+
+    <rect x="630" y="130" width="230" height="80" rx="12" fill="#0f3d2e" stroke="#4ade80" stroke-width="2.5"/>
+    <text x="745" y="167" fill="#d1fae5" font-size="19" font-weight="700" text-anchor="middle">DataFusion</text>
+    <text x="745" y="191" fill="#a7f3d0" font-size="13" text-anchor="middle">optional</text>
+
+    <rect x="900" y="130" width="290" height="80" rx="12" fill="#2e1f47" stroke="#a78bfa" stroke-width="2.5"/>
+    <text x="1045" y="167" fill="#ddd6fe" font-size="19" font-weight="700" text-anchor="middle">BI tools / notebooks</text>
+    <text x="1045" y="191" fill="#c4b5fd" font-size="13" text-anchor="middle">Iceberg-REST clients</text>
+  </g>
+
+  <!-- arrows to catalog -->
+  <g stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#a10)">
+    <path d="M205 210 L540 300"/>
+    <path d="M475 210 L590 300"/>
+    <path d="M745 210 L690 300"/>
+    <path d="M1045 210 L740 300"/>
+  </g>
+
+  <!-- catalog -->
+  <rect x="360" y="305" width="560" height="110" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+  <text x="640" y="345" fill="#fde68a" font-size="23" font-weight="700" text-anchor="middle">Unity Catalog OSS — Iceberg REST</text>
+  <text x="640" y="378" fill="#fbbf24" font-size="15" text-anchor="middle" font-family="monospace">/api/2.1/unity-catalog/iceberg</text>
+  <text x="640" y="402" fill="#fef3c7" font-size="14" text-anchor="middle">one endpoint · one source of truth</text>
+
+  <path d="M640 415 L640 480" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#a10)"/>
+
+  <!-- storage / tables -->
+  <rect x="360" y="485" width="560" height="120" rx="16" fill="#0c3b40" stroke="#22d3ee" stroke-width="3"/>
+  <text x="640" y="523" fill="#a5f3fc" font-size="20" font-weight="700" text-anchor="middle">Iceberg Gold tables in object storage</text>
+  <text x="640" y="556" fill="#cffafe" font-size="15" text-anchor="middle" font-family="monospace">gold.daily_revenue · one physical copy</text>
+  <text x="640" y="584" fill="#67e8f9" font-size="14" text-anchor="middle">every engine reads the SAME files</text>
+
+  <text x="640" y="660" fill="#94a3b8" font-size="16" text-anchor="middle">The catalog replaces the export-and-copy of a closed warehouse with a single pointer.</text>
+
+  <defs>
+    <marker id="a10" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/></marker>
+  </defs>
+</svg>

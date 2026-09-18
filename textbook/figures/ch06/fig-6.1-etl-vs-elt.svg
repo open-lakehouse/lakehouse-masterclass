@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">ETL vs. ELT — the lakehouse loads raw first</text>
+
+  <!-- ETL (top) -->
+  <text x="80" y="150" fill="#f87171" font-size="24" font-weight="700">ETL — the old way</text>
+  <g>
+    <rect x="80" y="175" width="180" height="70" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
+    <text x="170" y="217" fill="#e2e8f0" font-size="18" text-anchor="middle" font-weight="700">Source</text>
+
+    <rect x="330" y="175" width="220" height="70" rx="12" fill="#3f1d1d" stroke="#f87171" stroke-width="2.5"/>
+    <text x="440" y="208" fill="#fecaca" font-size="18" text-anchor="middle" font-weight="700">Transform</text>
+    <text x="440" y="230" fill="#fca5a5" font-size="13" text-anchor="middle">in a separate tool</text>
+
+    <rect x="620" y="175" width="200" height="70" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="720" y="217" fill="#dbeafe" font-size="18" text-anchor="middle" font-weight="700">Load (polished)</text>
+
+    <rect x="880" y="175" width="320" height="70" rx="12" fill="#3f1d1d" stroke="#f87171" stroke-width="2" stroke-dasharray="6 4"/>
+    <text x="1040" y="208" fill="#fca5a5" font-size="16" text-anchor="middle" font-weight="700">raw is discarded</text>
+    <text x="1040" y="230" fill="#fca5a5" font-size="13" text-anchor="middle">can't re-process later</text>
+  </g>
+  <g stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#a6)">
+    <path d="M260 210 L326 210"/>
+    <path d="M550 210 L616 210"/>
+    <path d="M820 210 L876 210"/>
+  </g>
+
+  <line x1="80" y1="300" x2="1200" y2="300" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+  <!-- ELT (bottom) -->
+  <text x="80" y="370" fill="#4ade80" font-size="24" font-weight="700">ELT — the lakehouse way</text>
+  <g>
+    <rect x="80" y="395" width="180" height="70" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
+    <text x="170" y="437" fill="#e2e8f0" font-size="18" text-anchor="middle" font-weight="700">Source</text>
+
+    <rect x="330" y="395" width="200" height="70" rx="12" fill="#1e3a5f" stroke="#3b82f6" stroke-width="2.5"/>
+    <text x="430" y="428" fill="#dbeafe" font-size="18" text-anchor="middle" font-weight="700">Load raw</text>
+    <text x="430" y="450" fill="#93c5fd" font-size="13" text-anchor="middle">Extract + Load</text>
+
+    <rect x="600" y="395" width="220" height="70" rx="12" fill="#0f3d2e" stroke="#4ade80" stroke-width="3"/>
+    <text x="710" y="428" fill="#d1fae5" font-size="18" text-anchor="middle" font-weight="700">Bronze table</text>
+    <text x="710" y="450" fill="#a7f3d0" font-size="13" text-anchor="middle">raw kept forever</text>
+
+    <rect x="890" y="395" width="310" height="70" rx="12" fill="#2e1f47" stroke="#a78bfa" stroke-width="2.5"/>
+    <text x="1045" y="428" fill="#ddd6fe" font-size="18" text-anchor="middle" font-weight="700">Transform in place (Ch 7)</text>
+    <text x="1045" y="450" fill="#c4b5fd" font-size="13" text-anchor="middle">Silver → Gold, with Spark</text>
+  </g>
+  <g stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#a6)">
+    <path d="M260 430 L326 430"/>
+    <path d="M530 430 L596 430"/>
+    <path d="M820 430 L886 430"/>
+  </g>
+
+  <text x="640" y="560" fill="#94a3b8" font-size="17" text-anchor="middle">Cheap storage + co-located compute make "load raw, transform later" faster to build — and re-processable.</text>
+
+  <defs>
+    <marker id="a6" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+</svg>

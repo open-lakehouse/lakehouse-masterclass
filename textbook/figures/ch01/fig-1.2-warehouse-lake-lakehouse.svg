@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="64" fill="#f8fafc" font-size="40" font-weight="700" text-anchor="middle">Warehouse vs. Lake vs. Lakehouse</text>
+  <text x="640" y="100" fill="#94a3b8" font-size="20" text-anchor="middle">Two old options with fatal trade-offs — and the resolution</text>
+
+  <!-- Panel 1: Data Warehouse -->
+  <g>
+    <rect x="60" y="150" width="340" height="470" rx="16" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+    <text x="230" y="196" fill="#f1f5f9" font-size="26" font-weight="700" text-anchor="middle">Data Warehouse</text>
+    <!-- locked box -->
+    <rect x="150" y="230" width="160" height="130" rx="10" fill="#334155" stroke="#64748b" stroke-width="2"/>
+    <rect x="205" y="285" width="50" height="45" rx="6" fill="#0f172a" stroke="#64748b" stroke-width="2"/>
+    <path d="M215 285 v-14 a15 15 0 0 1 30 0 v14" fill="none" stroke="#eab308" stroke-width="4"/>
+    <text x="230" y="392" fill="#cbd5e1" font-size="17" text-anchor="middle">Closed · proprietary</text>
+    <text x="230" y="418" fill="#cbd5e1" font-size="17" text-anchor="middle">Storage + compute coupled</text>
+    <line x1="90" y1="446" x2="370" y2="446" stroke="#334155" stroke-width="1.5"/>
+    <text x="230" y="480" fill="#4ade80" font-size="17" text-anchor="middle">✓ ACID · schema · fast SQL</text>
+    <text x="230" y="512" fill="#f87171" font-size="17" text-anchor="middle">✗ Expensive to scale</text>
+    <text x="230" y="544" fill="#f87171" font-size="17" text-anchor="middle">✗ Locked-in format</text>
+    <text x="230" y="576" fill="#f87171" font-size="17" text-anchor="middle">✗ One engine only</text>
+  </g>
+
+  <!-- Panel 2: Data Lake -->
+  <g>
+    <rect x="470" y="150" width="340" height="470" rx="16" fill="#1e293b" stroke="#334155" stroke-width="2"/>
+    <text x="640" y="196" fill="#f1f5f9" font-size="26" font-weight="700" text-anchor="middle">Data Lake</text>
+    <!-- pile of files -->
+    <g transform="translate(540,232)">
+      <rect x="0" y="60" width="46" height="58" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="52" y="40" width="46" height="78" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="104" y="70" width="46" height="48" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="156" y="52" width="46" height="66" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="26" y="20" width="46" height="60" rx="5" fill="#64748b" stroke="#94a3b8"/>
+      <rect x="128" y="28" width="46" height="56" rx="5" fill="#64748b" stroke="#94a3b8"/>
+    </g>
+    <text x="640" y="392" fill="#cbd5e1" font-size="17" text-anchor="middle">Cheap files in object storage</text>
+    <text x="640" y="418" fill="#cbd5e1" font-size="17" text-anchor="middle">Open, but no guarantees</text>
+    <line x1="500" y1="446" x2="780" y2="446" stroke="#334155" stroke-width="1.5"/>
+    <text x="640" y="480" fill="#4ade80" font-size="17" text-anchor="middle">✓ Cheap · open · any engine</text>
+    <text x="640" y="512" fill="#f87171" font-size="17" text-anchor="middle">✗ No transactions</text>
+    <text x="640" y="544" fill="#f87171" font-size="17" text-anchor="middle">✗ No reliable schema</text>
+    <text x="640" y="576" fill="#f87171" font-size="17" text-anchor="middle">✗ Becomes a "data swamp"</text>
+  </g>
+
+  <!-- Panel 3: Open Lakehouse -->
+  <g>
+    <rect x="880" y="150" width="340" height="470" rx="16" fill="#12233b" stroke="#38bdf8" stroke-width="3"/>
+    <text x="1050" y="196" fill="#f1f5f9" font-size="26" font-weight="700" text-anchor="middle">Open Lakehouse</text>
+    <!-- files -->
+    <g transform="translate(950,300)">
+      <rect x="0" y="0" width="42" height="52" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="50" y="0" width="42" height="52" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="100" y="0" width="42" height="52" rx="5" fill="#475569" stroke="#64748b"/>
+      <rect x="150" y="0" width="42" height="52" rx="5" fill="#475569" stroke="#64748b"/>
+    </g>
+    <text x="1050" y="290" fill="#94a3b8" font-size="15" text-anchor="middle">…same cheap files…</text>
+    <!-- open table format layer on top -->
+    <rect x="925" y="232" width="250" height="46" rx="8" fill="#0ea5e9" opacity="0.9"/>
+    <text x="1050" y="261" fill="#082f49" font-size="17" font-weight="700" text-anchor="middle">open table format (Iceberg)</text>
+    <text x="1050" y="392" fill="#cbd5e1" font-size="17" text-anchor="middle">Warehouse guarantees</text>
+    <text x="1050" y="418" fill="#cbd5e1" font-size="17" text-anchor="middle">on cheap open storage</text>
+    <line x1="910" y1="446" x2="1190" y2="446" stroke="#1e3a52" stroke-width="1.5"/>
+    <text x="1050" y="480" fill="#4ade80" font-size="17" text-anchor="middle">✓ ACID + time travel</text>
+    <text x="1050" y="512" fill="#4ade80" font-size="17" text-anchor="middle">✓ Cheap open storage</text>
+    <text x="1050" y="544" fill="#4ade80" font-size="17" text-anchor="middle">✓ Schema evolution</text>
+    <text x="1050" y="576" fill="#4ade80" font-size="17" text-anchor="middle">✓ Many engines</text>
+  </g>
+
+  <!-- arrows -->
+  <text x="435" y="400" fill="#64748b" font-size="34" text-anchor="middle">→</text>
+  <text x="845" y="400" fill="#38bdf8" font-size="34" text-anchor="middle">→</text>
+  <text x="1050" y="668" fill="#38bdf8" font-size="18" font-weight="700" text-anchor="middle">best of both worlds</text>
+</svg>
