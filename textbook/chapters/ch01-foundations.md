@@ -1,360 +1,286 @@
-# Chapter 1 — Foundations: What an Open Lakehouse Is and Why You'd Build One
+# Chapter 1 — The Decisions You Make Before You Write Any Code
 
-## 1.0 What you'll build in this chapter
+You've been handed a mandate: stand up a lakehouse for your organization, and you
+have weeks, not quarters. Before you install a single tool, you owe your future self
+a handful of decisions. Some are cheap to change later. A few are not — get them
+wrong and you'll be migrating data formats or re-platforming a catalog six months
+in, on a Friday, while people wait on you.
 
-Nothing yet — and that's deliberate. Before you install a single tool, this
-chapter gives you the **map**: what an open lakehouse actually is, why the
-open-source approach is worth your time, and a labeled tour of the exact stack
-you'll assemble over the next twelve chapters. Everything after this is
-hands-on; this chapter is the mental model that makes the rest click.
+This chapter is the decision record. It's the doc a senior engineer would hand you
+on day one: here are the calls you have to make, here's the call I'd make and why,
+here's when I'd choose differently, and here's how you *prove* each decision is
+production-ready before you build on top of it. The rest of the book is execution;
+this chapter is the architecture.
 
-Think of it like being handed the blueprint before you help build the house.
-You could start nailing boards together immediately, but ten minutes spent
-understanding *why the foundation goes where it goes* saves you from tearing out
-walls later. By the time you finish this chapter, you'll be able to look at any
-modern data platform — Databricks, Snowflake's Iceberg tables, AWS's lakehouse
-offerings — and recognize the same handful of moving parts underneath the
-marketing.
+![The decisions map onto the layers you'll build](../figures/ch01/fig-1.1-progress-map.svg)
 
-![Progress map: the 10 layers you'll build](../figures/ch01/fig-1.1-progress-map.svg)
+**Figure 1.1** — The layers you'll stand up, bottom-up. Every decision below maps to
+one of these. We return to this map at the start of every chapter.
 
-**Figure 1.1** — The recurring progress map, which we return to at the start of
-every chapter with the current layer highlighted.
+## 1.1 What you'll decide in this chapter
 
-## 1.1 Learning objectives
+By the end you'll have made — at least provisionally — every architecture decision
+that shapes the build:
 
-By the end of this chapter you can:
+- **Do you even need a lakehouse?** (The gut-check that saves some readers months.)
+- **Table format:** Iceberg, Delta, or Hudi — the one hard-to-reverse choice.
+- **Catalog:** where table metadata lives, and why a REST catalog now.
+- **Object store:** where the bytes physically sit.
+- **Compute + how you talk to it:** Spark, driven by Spark Connect.
+- **Batch, streaming, or both — on day one?**
+- **Self-hosted vs. managed:** who runs it, and how that changes your build.
+- **The week-one sequence:** what order to actually do this in.
 
-- Explain the difference between a data warehouse, a data lake, and a **lakehouse**
-  in one sentence each — and explain *why* each one exists.
-- Define **open table format** and why it's the single piece that makes a
-  lakehouse possible.
-- Give three practitioner reasons to build on an open-source stack, and answer
-  the "why not just use the cloud console?" objection.
-- Name every component in the stack and the one job each does.
-- Describe the bottom-up build order and why each layer depends on the one below it.
+## 1.2 Gut-check: do you actually need a lakehouse?
 
-## 1.2 A story: the pipeline that ate a weekend
+Before anything, be honest about whether this is the right tool, because "we should
+build a lakehouse" is sometimes cargo-culting. You need one when **at least two** of
+these are true:
 
-Let's start with a scene you may recognize, because it explains *why this entire
-field exists*.
+- Your data is too big or too varied for a single Postgres/MySQL to serve
+  analytics comfortably (you're into hundreds of GBs / TBs, or many source systems).
+- You need **more than one engine** to touch the same data — BI tool *and* Spark
+  *and* maybe a notebook or a model — without maintaining copies.
+- You need **cheap retention** of large raw history (compliance, replay,
+  reprocessing) that a warehouse would make expensive.
+- You want to avoid **vendor lock-in** on either storage or compute.
 
-A data engineer — call her Maya — runs the nightly job that loads the company's
-order data into the analytics warehouse. It's Friday. Two things happen at once:
-the nightly load kicks off, and a colleague in another timezone manually re-runs
-a backfill for last week's numbers. Both jobs write to the same `orders` table.
-By Saturday morning, the finance dashboard shows revenue that's roughly *double*
-what it should be — the two jobs interleaved their writes and nobody can tell
-which rows are real. There's no "undo." There's no record of what the table
-looked like *before* the mess. Maya spends the weekend reconstructing the table
-from raw files, by hand.
+If you're a single team with a few dozen GB and one BI tool, a managed warehouse
+(BigQuery, Snowflake, even a big Postgres) may be the *right* answer and far less to
+operate. There's no prize for building infrastructure you didn't need. The lakehouse
+earns its complexity when you have multiple consumers, big cheap history, and a
+desire not to be trapped.
 
-Every capability we build in this course exists to prevent some version of
-Maya's weekend:
+> **Practitioner note:** the honest version of "do we need this" is often "we will
+> within a year, and migrating later is worse than building right now." That's a
+> legitimate reason. Just make it a *decision*, not a default.
 
-- **ACID transactions** so two writers can't corrupt each other.
-- **Snapshots and time travel** so "what did this table look like before?" is a
-  one-line query, and "undo" is real.
-- **Schema enforcement** so a malformed load is rejected at the door, not
-  discovered in a dashboard.
-- **An open format** so that when something *does* go wrong, you can inspect the
-  underlying files with *any* tool, not just the one vendor's console.
+## 1.3 The shape: an open lakehouse in one diagram
 
-Keep Maya in mind. When we reach time travel in Chapter 5 and you roll a table
-back to a previous snapshot in a single command, that's the weekend she never
-gets back — handed to you as a feature.
+Assuming you're building one, here's the reference architecture you're standing up.
+It's layered bottom-up because each layer consumes the one beneath it — you can't
+transform data you can't store and compute on.
 
-## 1.3 The problem: two bad options
+![The open lakehouse architecture](../figures/ch01/fig-1.4-architecture-map.svg)
 
-For most of data's history, you chose between two architectures, each with a
-fatal trade-off.
+**Figure 1.4** — Object storage at the base; compute and the table/catalog layer
+above it; ingestion, transformation, and streaming in the middle; orchestration
+across them; serving, AI, and agents on top. This is the system you'll have running
+by the last chapter.
 
-**The data warehouse.** A closed, transactional system (think Teradata, or
-classic Snowflake/BigQuery usage) where storage and compute are tightly coupled.
-It's reliable — ACID transactions, enforced schemas, fast SQL — but it's
-proprietary, and because storage and compute scale together, it gets expensive
-quickly. Your data lives in *their* format; getting it out or querying it with
-another tool is painful.
+The one-line version of what a lakehouse *is*, so we share vocabulary: **warehouse-
+grade tables — ACID transactions, schema evolution, time travel — served directly on
+cheap object storage, using open formats.** You get the reliability of a warehouse
+and the cost/openness of a lake, because a metadata layer (the table format) turns a
+pile of files into a real transactional table. That's the whole trick; the decisions
+below are about how you implement it without painting yourself into a corner.
 
-The warehouse's original sin is **coupling**. Because the storage and the query
-engine are welded together, you can't scale them independently. Need more
-storage but not more compute? Too bad — you pay for both. Want to run a
-machine-learning framework directly against the data? You can't; it only speaks
-the warehouse's SQL dialect through the warehouse's connectors. The data is a
-hostage in a very comfortable prison.
+![Warehouse vs. lake vs. lakehouse](../figures/ch01/fig-1.2-warehouse-lake-lakehouse.svg)
 
-**The data lake.** The reaction to that: just dump files (CSV, JSON, Parquet)
-into cheap **object storage** and query them with whatever engine you like. Cheap
-and open — but you lose everything the warehouse gave you. No transactions, so
-two jobs writing at once corrupt each other (Maya's weekend). No reliable schema,
-so a column can silently change type between Tuesday and Wednesday. No easy way
-to update or delete a single row — object storage only really knows how to write
-a *whole new file*. Lakes routinely degraded into "data swamps": vast, cheap, and
-untrustworthy.
+**Figure 1.2** — Why the lakehouse exists: a warehouse is reliable but closed and
+coupled; a lake is open and cheap but offers no guarantees; a lakehouse puts
+warehouse guarantees on cheap open storage via an open table format. If you already
+know this, skip ahead to the decisions — that's what you came for.
 
-Here's the tension in one line: **the warehouse gave you trust but took your
-freedom; the lake gave you freedom but took your trust.** For a decade,
-practitioners assembled awkward hybrids — a lake for cheap storage *and* a
-warehouse for trusted queries, with brittle pipelines shovelling data between
-them. Two copies of everything, two bills, two things to keep in sync.
+## 1.4 Decision 1 — Table format: Iceberg, Delta, or Hudi?
 
-**Table 1.1** — Warehouse vs. Lake vs. Lakehouse:
+**The call: Apache Iceberg, unless your org is all-in on Databricks — then Delta.**
 
-| Property | Data Warehouse | Data Lake | **Open Lakehouse** |
+This is the decision that's genuinely hard to reverse, because it dictates how every
+byte you write is physically laid out and what can read it. Make this one
+deliberately.
+
+| | **Iceberg** | Delta | Hudi |
 |---|---|---|---|
-| Storage cost | High | Low | **Low** |
-| Open format | No | Yes | **Yes** |
-| ACID transactions | Yes | No | **Yes** |
-| Schema enforcement/evolution | Yes | No | **Yes** |
-| Time travel / rollback | Limited | No | **Yes** |
-| Multi-engine access | No | Yes | **Yes** |
-| Storage/compute decoupled | No | Yes | **Yes** |
+| Engine neutrality | **Best** — Spark, Trino, Flink, DuckDB, Snowflake, BigQuery | Good; historically Spark-first | Good; Spark-centric |
+| Best at | Broad interop, large-scale analytics | Databricks-native workloads | High-frequency upserts / CDC |
+| Catalog | REST catalog standard (what we use) | Unity Catalog / Hive | Hive-based |
+| Reversibility if you're wrong | **Low risk** — everyone reads it | Medium | Medium |
 
-Read that last column top to bottom. The whole premise of this course is that
-you no longer have to choose — you can have every property in the "good" column
-at once, on your own laptop, with open-source tools.
+**Why Iceberg for most orgs:** it's the format least likely to trap you. If your
+future includes *any* engine besides Spark — a BI tool, DuckDB on an analyst's
+laptop, Snowflake, Trino — Iceberg reads everywhere with no migration. On a deadline,
+you are optimizing for "I will not have to redo this," and Iceberg is the safest bet
+on that axis. Its governance is a genuinely open, multi-vendor standard, not one
+company's roadmap.
 
-## 1.4 The resolution: the open lakehouse
+**Pick Delta instead when:** your org already runs Databricks and will for the
+foreseeable future. Delta is the path of least resistance there and Databricks makes
+it excellent — don't fight your platform to be a purist.
 
-> **Open lakehouse** *(canonical term)*: warehouse-grade tables — ACID
-> transactions, schema evolution, time travel — provided directly on cheap object
-> storage, using open file and table formats.
+**Pick Hudi when:** your *primary* pattern is high-frequency upserts / change-data-
+capture — constant streaming mutations to the same keys. It's built for that. If
+that's not your dominant workload, skip the added complexity.
 
-The trick is a new layer. You still keep your data as cheap files in object
-storage. But you place an **open table format** on top of those files.
+> **Production gate — do this in week one, not month three:** write a 10-row table in
+> your chosen format and *read it from every consumer you'll have* — Spark, your BI
+> tool, DuckDB, whatever. If any consumer can't read it today, you've found a problem
+> while it's cheap to fix. This course uses **Iceberg**.
 
-> **Open table format** *(canonical term)*: a specification — we'll use **Apache
-> Iceberg** — that adds a metadata layer over your data files so a plain pile of
-> files behaves like a transactional table.
+## 1.5 Decision 2 — Catalog: where does table metadata live?
 
-That metadata layer is what turns files into a real table: it tracks which files
-belong to the table right now, records every write as a versioned **snapshot**
-(enabling time travel and rollback), enforces and evolves schema, and coordinates
-concurrent writers so they don't corrupt each other. Open format on the bottom,
-warehouse guarantees on top, cheap storage throughout.
+**The call: a REST catalog — Unity Catalog OSS — from day one. Don't start on the
+Hive metastore.**
 
-An analogy that tends to stick: object storage is a **warehouse full of unlabeled
-boxes**. Cheap to rent, infinite space, but finding "the orders from last
-Tuesday" means opening every box. The open table format is the **inventory
-management system** bolted on top — a precise, always-current ledger of which
-boxes hold what, when each box arrived, and which boxes made up the inventory *as
-of any past date*. The boxes (your Parquet files) never change what they
-fundamentally are; the ledger is what makes the warehouse behave like a store.
+The catalog is the service that answers "what tables exist, and where are their
+files?" Every engine asks the catalog before it reads. This decision determines who
+can find your tables and how painful multi-engine access will be.
 
-![Warehouse vs. Lake vs. Lakehouse](../figures/ch01/fig-1.2-warehouse-lake-lakehouse.svg)
+- **REST catalog (Iceberg REST / Unity Catalog OSS):** a modern, standard HTTP
+  protocol many engines speak natively. One endpoint, many engines. This is where the
+  ecosystem is going, and it's what makes "serve the same tables to Spark and DuckDB"
+  a config line instead of a project.
+- **Hive metastore:** the legacy default. Ubiquitous, but it's a heavier, older
+  service, and you'll spend time on it you could spend elsewhere. Starting here in
+  2026 is choosing tech debt.
 
-**Figure 1.2** — The three-panel contrast: locked warehouse box → loose pile of
-lake files → lakehouse (files + an "open table format: ACID · time travel ·
-schema" layer drawn on top).
+**Why Unity Catalog OSS:** it gives you the open Iceberg REST endpoint *and* a path
+to real governance (access control, lineage) as you grow — without committing you to
+a vendor. You'll wire it in Chapter 5 and lean on it for serving (Chapter 10) and
+agents (Chapter 12).
 
-### Under the hood — why "table format," not "file format"
+> **Production gate:** your catalog is a critical, stateful service. Decide *now*
+> where its metadata database (Postgres) lives and how it's backed up. A lost catalog
+> means "my files exist but nothing knows they're tables." Treat it like the
+> production database it is.
 
-Parquet is a *file* format — it describes how one file's columns are stored,
-compressed, and encoded. A *table* format sits a level up: it's the metadata that
-says "these 240 Parquet files, at these paths, as of this snapshot, are the table
-`orders`." The distinction matters because it's exactly what the lake was
-missing. A pile of Parquet files is just a pile of files; nothing records that
-they collectively *are* a table, which files are current, or what happened when.
+## 1.6 Decision 3 — Object store: where do the bytes live?
 
-Iceberg, Delta Lake, and Apache Hudi are the three main open table formats. All
-three solve the same core problem; they differ in metadata layout and ecosystem.
-This course uses **Iceberg** because it's the most engine-neutral — the format
-least tied to any single vendor's compute — but the *concepts* you learn transfer
-directly to all three.
+**The call: S3 in production; run SeaweedFS (or MinIO) locally to build against the
+same S3 API.**
 
-### Under the hood — how a table format gives you ACID on "dumb" storage
+Object storage is the cheap, effectively infinite foundation. The important
+practitioner insight: **you build against the S3 API, not a specific product**, so
+the store is swappable. Develop locally on SeaweedFS, deploy on Amazon S3, and your
+tables and pipelines don't change — only an endpoint and credentials.
 
-Object storage can't do transactions. It can barely do "rename a file" reliably.
-So how does Iceberg give you ACID? With a trick: **every change produces a brand
-new metadata file describing the new state of the table, and a single atomic
-"pointer swap" makes it official.** Writers never edit existing files in place —
-they add new data files and write a new metadata snapshot. The table "becomes"
-the new version only when the catalog atomically updates one pointer from the old
-snapshot to the new one. If two writers race, only one wins the pointer swap; the
-other is told to retry. That single atomic swap — the one operation object stores
-*can* do safely — is the foundation the entire lakehouse stands on. You'll see the
-snapshots this produces first-hand in Chapter 5.
+- **Amazon S3 (or GCS/Azure equivalent):** the production answer. Durable, zero-ops,
+  the default for real deployments.
+- **MinIO:** self-hosted, fully S3-compatible; common on-prem and in enterprise labs.
+- **SeaweedFS:** lightweight, tiny footprint — **our choice for local**, because it
+  gives you a real S3 endpoint without eating your laptop.
 
-## 1.5 Why open source for this build
+We go deep on this in Chapter 3 (including *why* object storage's quirks — no real
+folders, no in-place edits — shape everything above it). For now the decision is:
+S3-API everywhere, a light local store for the build.
 
-Three practitioner reasons — not ideology, just pragmatics:
+## 1.7 Decision 4 — Compute, and how you talk to it
 
-1. **No lock-in.** Every component is an open standard you can run on your laptop,
-   on-prem, or on any cloud. Your data stays in open formats you own. If a vendor
-   triples their price or a tool falls out of favor, your data doesn't move — you
-   just point a different engine at the same Iceberg tables.
-2. **No cloud bill to learn.** The whole system runs locally, so you can
-   experiment freely, break things, and tear it all down — without a credit card
-   or a running meter quietly draining your budget while you learn.
-3. **The same stack underlies the paid platforms.** Databricks is built on Spark
-   and Delta/Iceberg; managed services wrap Kafka and Airflow; Snowflake now reads
-   and writes Iceberg. Learn the open tools directly and moving to a managed
-   service later is a small step — you already understand what's under the hood,
-   so the managed product is just "this, but someone else runs it."
+**The call: Apache Spark, driven by Spark Connect (`sc://`) — not the classic
+embedded driver.**
 
-### "Why not just click around in a cloud console?"
+Spark is the workhorse that ingests, transforms, and streams. The decision that
+matters here isn't "Spark or not" (it's the safe default for a lakehouse); it's *how
+your code talks to Spark*. Spark Connect makes your client a thin gRPC library that
+drives a remote cluster, instead of bundling the whole engine into your process.
 
-It's the fair objection, so let's answer it directly. Cloud consoles are
-excellent — for people who already understand what the buttons do. The problem is
-that they *hide the architecture*. Click "create table" in a managed console and
-you learn where that vendor put the button; you don't learn what a table format
-is, why a catalog exists, or what happens when two writers collide. When
-something breaks at 2 a.m. — and it will — button-knowledge runs out fast.
-Building the stack yourself, once, from the storage layer up, is how you develop
-the mental model that makes *every* platform legible. This course is the
-expensive-to-learn-the-hard-way knowledge, made cheap and safe.
+Why it's the modern default, in one breath: thin clients, connect from anywhere with
+one URL, and — the headline — **isolation**, so one bad job can't take down the
+shared cluster. The trade-off you accept: the DataFrame/SQL surface only (no low-
+level RDD internals), and static config must be set server-side. Full treatment in
+Chapter 4; the newer Spark Declarative Pipelines (Chapter 7) are built on Connect, so
+choosing it now pays off later.
 
-![The open-source stack and its three benefits](../figures/ch01/fig-1.3-stack-benefits.svg)
+## 1.8 Decision 5 — Batch, streaming, or both — on day one?
 
-**Figure 1.3** — Stack component row (SeaweedFS, Spark, Iceberg, Kafka, Airflow,
-DuckDB, MLflow) captioned "no lock-in · no cloud bill · portable skills."
+**The call: batch first. Add streaming only when a real freshness requirement demands
+it — and be suspicious of "real-time" requirements.**
 
-## 1.6 The stack, layer by layer
+This is where teams over-build. Streaming is genuinely harder to operate — unbounded
+state, late/out-of-order events, checkpoints, exactly-once headaches. It's worth that
+cost when minutes or seconds matter (fraud, live ops, alerting). It is *not* worth it
+when "within an hour" or "nightly" is actually fine, which — if you ask hard — is
+most "real-time" requests.
 
-Here's every component and the single job it does. We build **bottom-up**,
-because each layer consumes the one beneath it — you can't transform data before
-you can store and compute it, and you can't serve or train on data you haven't
-transformed.
+Ship the batch medallion first (Chapters 6–7). It's simpler, easier to make
+idempotent, and covers the majority of needs. Layer streaming on (Chapter 8) for the
+specific pipelines that truly need freshness, feeding the *same* tables. Both paths
+coexist; you don't have to choose one forever.
 
-**Table 1.2** — The stack and build order:
+> **Production gate:** for every "real-time" requirement, write down the actual
+> tolerated latency and who needs it. Half will collapse into "batch is fine," and
+> you'll have saved yourself an operational burden.
 
-| Build order | Layer | Component | Its one job |
-|---|---|---|---|
-| 1 | **Storage** | SeaweedFS (S3 API) + Iceberg format | Hold data cheaply **and** decide how files become tables |
-| 2 | **Compute** | Apache Spark 4.x via **Spark Connect** (`sc://`) | Read, write, and transform data from a thin remote client |
-| 3 | **Tables & Catalog** | Apache Iceberg + **Unity Catalog OSS** | Create real Iceberg tables a catalog can track and any engine can find |
-| 4 | **Ingestion** | Spark Connect → Iceberg | Land raw source data (Bronze) |
-| 5 | **Transformation** | Spark Declarative Pipelines (SDP) | Build Bronze → Silver → Gold declaratively |
-| 6 | **Streaming** | Kafka + Spark Structured Streaming | Handle real-time events |
-| 7 | **Orchestration** | Apache Airflow | Schedule and wire pipelines together |
-| 8 | **Serving** | Unity Catalog OSS (REST catalog) | Expose the same tables to any engine |
-| 9 | **AI** | MLflow | Train, track, and register a model on the data |
-| 10 | **Agents** | `./lakehouse` CLI + skills | Let an LLM operate the lakehouse |
+## 1.9 Decision 6 — Self-hosted vs. managed: who runs this?
 
-Notice how the list reads like a sentence: *store* the data, get *compute* to act
-on it, wrap it in *tables* a *catalog* can find, *ingest* raw data, *transform* it
-into clean tables, add a *streaming* path for real-time, *orchestrate* the whole
-thing on a schedule, *serve* it to any engine, feed it to *AI*, and finally let an
-*agent* operate it all. Each layer is a consumer of the one below and a provider
-to the one above.
+**The call: prototype self-hosted (this course), decide managed-vs-self per component
+for production based on your team's operational capacity.**
 
-A note on the two halves of storage. "Storage" in a lakehouse is really *two*
-decisions stacked on top of each other, and Chapter 3 covers both: first, **where
-the bytes live** — an **object store** like SeaweedFS, MinIO, or Amazon S3, all
-speaking the same S3 API — and second, **how those files become a table** — an
-**open table format** like Iceberg, Delta, or Hudi layered on top of the files. We
-choose **SeaweedFS** for the object store (lightweight, laptop-friendly) and
-**Iceberg** for the table format (engine-neutral — the heart of the "open"
-promise). Chapter 5 then does the hands-on Iceberg build now that the *choice* is
-made: creating tables through **Unity Catalog OSS**, schema evolution, and time
-travel.
+Everything you build here is self-hosted, which is perfect for *learning the guts*
+and for a cost-controlled prototype. For production, the honest tradeoff is **managed
+buys time and costs money and control**: a managed Spark/Kafka/Airflow means you
+don't patch, scale, or get paged for infrastructure — you pay for that, in dollars
+and some flexibility.
 
-A note on compute. We drive Spark with **Spark Connect** — a thin client that
-talks to a remote Spark cluster over `sc://` — rather than the classic model where
-your program bundles the whole Spark engine. Chapter 4 explains why this is the
-modern default (connect from anywhere, thin dependencies, client/server
-isolation), and Spark Declarative Pipelines in Chapter 7 build on it.
+Because you build on open standards, this isn't a one-way door: your Iceberg tables,
+Spark jobs, SDP pipelines, and Airflow DAGs port to managed services as a *lift, not
+a rewrite*. So the pragmatic path is: build it yourself to understand it, then move
+the pieces your team can't afford to operate onto managed services — keeping the open
+formats so you're never locked in. Chapter 13 tours the cloud/Terraform path.
 
-![The open lakehouse architecture map](../figures/ch01/fig-1.4-architecture-map.svg)
+## 1.10 The through-line: one real dataset, carried all the way
 
-**Figure 1.4** — The master architecture diagram: object storage at the base,
-compute and table/catalog above it, the data-flow layers (ingestion,
-transformation, streaming) in the middle, orchestration spanning them, and
-serving/AI/agents at the top. **This is the single most important visual in the
-course** — the progress map (Figure 1.1) is its condensed, recurring form.
-
-### Why bottom-up, and not top-down?
-
-You might reasonably ask: shouldn't we start with the *goal* — the dashboards, the
-model, the agent — and work backward? For *designing* a system, top-down is often
-right. For *building* and *learning* one, bottom-up wins, for a concrete reason:
-each layer is only testable once the layer beneath it works. You can't verify that
-ingestion landed data correctly until storage and compute exist to land it into
-and read it back with. Building bottom-up means every chapter ends with something
-you can actually run and check — a working, growing system — rather than a stack
-of mocks you can only validate at the very end. It's the difference between a
-house you can walk through room by room as it's built and one that only stands up
-when the last brick is placed.
-
-## 1.7 The through-line: one dataset, built once
-
-To keep the course coherent, we use one story throughout: a stream of realistic
-**e-commerce order events**. You'll land those orders raw, clean and conform them,
-aggregate them into business tables, schedule the whole pipeline, serve it to
-multiple engines, train a model on it, and finally let an agent operate it. Every
-chapter adds exactly one layer to a system you keep running — so by the end, the
-finished lakehouse in the cold-open demo is entirely yours.
-
-Why order events specifically? Because they exercise *every* capability naturally,
-without contrivance. Orders arrive continuously (a reason for **streaming**). They
-arrive messy — duplicates, nulls, wrong types (a reason for **transformation** and
-**data quality**). They aggregate into obviously useful business questions like
-"revenue per day" (a reason for **serving**). And they contain signal you can
-learn from, like predicting order value (a reason for **AI**). One honest dataset,
-carried all the way through, beats a dozen disconnected toy examples — and it's
-exactly the shape of data you'll meet in a real job.
+To keep this concrete instead of abstract, the whole build uses one realistic
+dataset: a stream of **e-commerce order events**. You'll land them raw, clean and
+conform them, aggregate them into business tables, schedule the pipeline, serve them
+to multiple engines, train a model on them, and finally let an agent operate the
+whole thing. One honest dataset — messy, continuous, aggregatable, with signal to
+learn from — exercises every layer the way real work does.
 
 ![One order event's journey through the stack](../figures/ch01/fig-1.5-order-event-journey.svg)
 
-**Figure 1.5** — The order-event's journey across the layers (a single horizontal
-"data flows through the stack" ribbon).
+**Figure 1.5** — The order event's path across the layers: this is the data you'll
+follow from raw landing to business metric to model.
 
-## 1.8 Checkpoint
+## 1.11 Your week-one sequence
 
-No build this chapter. You're ready to proceed when you can, without looking:
+Decisions made, here's the order I'd actually execute in — each step is a chapter,
+each ends with something you can verify:
 
-- Draw the three-panel warehouse/lake/lakehouse contrast.
-- Say what an open table format adds and why it matters.
-- Name the ten layers in build order.
-- Explain, in your own words, how a table format delivers ACID on object storage
-  that can't do transactions itself.
+1. **Setup** (Ch 2) — prerequisites and the one CLI you'll drive everything with.
+2. **Storage** (Ch 3) — object store up, warehouse bucket, format locked.
+3. **Compute** (Ch 4) — Spark + Spark Connect, first remote job.
+4. **Tables & Catalog** (Ch 5) — real Iceberg tables through Unity Catalog OSS.
+5. **Ingestion → Transformation** (Ch 6–7) — batch medallion, Bronze→Silver→Gold.
+6. **Streaming** (Ch 8) — only if you need it.
+7. **Orchestration** (Ch 9) — schedule it so it runs without you.
+8. **Serving / AI / Agents** (Ch 10–12) — expose it, learn from it, operate it.
+9. **Deploy & harden** (Ch 13) — the path to production and clean teardown.
 
-## 1.9 Try it yourself
+Bottom-up, because each layer is only testable once the one beneath it works.
 
-No cluster required — these are thinking exercises to cement the mental model
-before we start building:
+## 1.12 Production-readiness checklist — Architecture decisions
 
-1. **Spot the layer.** Pick any data tool you've used (a BI dashboard, a Jupyter
-   notebook querying a database, an ETL tool). Which of the ten layers was it
-   playing the role of? What layer beneath it was it depending on, whether you saw
-   it or not?
-2. **Retell Maya's weekend.** In three or four sentences, explain to an imaginary
-   coworker which two lakehouse capabilities would have saved Maya's Friday-night
-   pipeline — and how each one specifically prevents the failure.
-3. **Argue the other side.** Come up with one honest scenario where a fully managed
-   cloud warehouse is genuinely the *better* choice than building this yourself.
-   (Understanding when *not* to build something is part of being a good engineer.)
-4. **Predict the dependencies.** Without reading ahead, sketch which layers the
-   "Serving" layer (Chapter 10) must have working before it can do its job.
+Every chapter from here ends with the *bare minimum to call this layer
+production-ready*. For the architecture itself:
 
-## 1.10 Check your understanding
+- [ ] **Lakehouse justified** — you can name the two-plus reasons you need one (§1.2).
+- [ ] **Table format chosen and proven** — a test table reads from *every* consumer
+      you'll have (§1.4).
+- [ ] **Catalog chosen** — REST catalog, with a decision on where its metadata DB
+      lives and how it's backed up (§1.5).
+- [ ] **Object store strategy** — S3-API everywhere; local store selected (§1.6).
+- [ ] **Compute transport** — Spark Connect, with awareness of the server-side-config
+      constraint (§1.7).
+- [ ] **Streaming scoped honestly** — each "real-time" need has a written latency SLA;
+      batch-first otherwise (§1.8).
+- [ ] **Self-host vs. managed** — a per-component plan for production, open formats
+      preserved so migration is a lift (§1.9).
 
-- What is the one operation object storage *can* do safely, and how does a table
-  format build ACID transactions on top of it?
-- A colleague says "Parquet is our table format." What's the correction, and why
-  does the distinction matter?
-- Give the one-sentence definition of each: data warehouse, data lake, open
-  lakehouse.
-- Why do we build the stack bottom-up rather than starting from the dashboards?
+If every box is checked, you have a defensible architecture you could put in a design
+doc and hand to your team. That's the deliverable of this chapter.
 
-## 1.11 Recap & what's next
+## 1.13 Recap & what's next
 
-- A **warehouse** is reliable but closed and coupled; a **lake** is open and
-  cheap but offers no guarantees; an **open lakehouse** puts warehouse guarantees
-  on cheap open storage via an **open table format**.
-- The warehouse traded freedom for trust; the lake traded trust for freedom; the
-  lakehouse refuses the trade and keeps both.
-- The magic is a **metadata layer** that turns a pile of files into a
-  transactional table via atomic snapshot pointer-swaps.
-- We build on open source for **no lock-in, no cloud bill, and transferable
-  skills** — and because building it yourself is the only way to truly understand
-  every platform built on the same parts.
-- The stack has **ten layers**, built **bottom-up**, unified by one order-event
-  dataset.
-- **Next — Chapter 2, Setup:** install prerequisites, clone the project, and bring
-  the environment up with a single command.
+- The hard-to-reverse decisions are **table format** and **catalog** — make those
+  deliberately; the rest are cheaper to change.
+- Default to **Iceberg + Unity Catalog OSS (REST) + S3-API storage + Spark Connect**,
+  **batch-first**, **self-host-to-learn / managed-where-you-must** — and deviate only
+  with a reason.
+- Build **bottom-up**, one verifiable layer at a time, following one real dataset.
+- **Next — Chapter 2, Setup:** install the prerequisites and bring up the one control
+  CLI you'll drive the whole stack with.
 
 ![Progress: Foundations complete, Setup next](../figures/ch01/fig-1.6-progress-foundations-done.svg)
 
-**Figure 1.6** — Progress map with **Foundations ✓** checked and **Setup**
-highlighted as next.
+**Figure 1.6** — Architecture decisions locked. Next: Setup.
