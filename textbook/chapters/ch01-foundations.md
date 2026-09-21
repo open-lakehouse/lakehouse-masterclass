@@ -48,7 +48,43 @@ Here's the one-line version of what a lakehouse is, so we share vocabulary: ware
 
 **Figure 1.2**. Why the lakehouse exists: a warehouse is reliable but closed and coupled; a lake is open and cheap but offers no guarantees; a lakehouse puts warehouse guarantees on cheap open storage via an open table format. If you already know this, skip ahead to the decisions. That's what you came for.
 
-## 1.4 Decision 1. Table format: Iceberg, Delta, or Hudi?
+## 1.4 What each layer is for, and the simpler thing it replaces
+
+Every layer in that diagram exists because a simpler approach breaks at a specific point. Knowing where each one breaks is what lets you defer a layer honestly when your scale hasn't hit that point yet, and defend it when someone asks why it's in the design. So for each layer: the simpler thing you'd reach for first, and the concrete failure that makes you reach for the layer instead.
+
+**Object store, instead of files on a disk or a warehouse's internal storage.** The naive option is to keep data on a big disk, or inside a database that owns its own storage. Both weld your data to one machine or one engine. A disk runs out and doesn't scale horizontally; a warehouse only lets the warehouse read the data, so a second engine means a second copy. Object storage is cheap, effectively unbounded, and readable by anything that speaks the S3 API. Decoupling storage from compute is the property the entire lakehouse is built on, which is why this layer is the floor and not optional.
+
+**Open table format, instead of reading Parquet straight from a bucket.** This is the question every engineer asks first: why not just point Spark at a folder of Parquet files in S3 and call it a table? It's worth answering properly, because Parquet is a genuinely good file format (columnar, compressed, carries per-file column stats) and a genuinely bad table. The gap is everything that makes a directory of files behave like a table:
+
+- Nothing records which files are the table. "The table" is whatever is under the prefix when you list it, so every read starts with a `LIST`, which is slow across millions of objects and historically wasn't consistent on S3 either.
+- Writes aren't atomic. If a job writes 200 files and dies after 120, a reader sees a half-written table as if it were real, because the filesystem contents are the only source of truth.
+- Concurrent writers clobber each other. Two jobs writing the same prefix have no commit protocol to coordinate, so you silently lose or duplicate data with no error raised.
+- Nothing enforces schema. Each Parquet file carries its own schema and nothing checks that Tuesday's files agree with Wednesday's. A column whose type drifts across files gives you a merge error at best and silent coercion at worst, and there is no safe way to rename or add a column across the set.
+- There are no row-level updates or deletes. Parquet files are immutable, so removing one customer's rows for a compliance request means finding, rewriting, and swapping every file that contains them, by hand, while hoping nothing reads mid-swap.
+- There is no history. Overwrite the files and the previous state is gone: no querying the table as of last Tuesday, no rolling back a bad load.
+- Query planning is expensive. To find the rows you want, the engine has to list the prefix and open file footers, because nothing above the files knows their value ranges or row counts.
+
+An open table format is exactly the metadata layer that closes that gap. Iceberg keeps a manifest of which files currently make up the table, with per-file statistics, and every write produces a new immutable snapshot and then atomically swaps a single pointer to it. That one indirection is what buys ACID commits, safe concurrent writers, schema evolution, row-level deletes, time travel, and file pruning without a directory listing. You are still storing Parquet underneath. The table format is the difference between "some files in a bucket" and "a table," and it's the layer you don't skip once correctness matters.
+
+**Distributed compute, instead of pandas on one machine.** The simple option is to pull data into pandas or DuckDB on a single box, and for a few dozen GB that's the right call, not a compromise. It breaks when a dataset outgrows one machine's memory, or when a transformation is heavy enough that one core-count isn't enough. Spark is the default here because it scales across machines and does both batch and streaming with one engine. If your data comfortably fits one box, use the lighter tool; adopt Spark when you actually hit its wall.
+
+**Ingestion as land-raw-first, instead of cleaning on the way in.** The tempting shortcut is to transform and filter during load, keeping only the rows you think you need. The failure is that you've thrown away information you can't recreate: the day you discover a bug in that cleaning logic, or a new question needs a field you dropped, the raw source may be gone. Landing raw first costs almost nothing and makes every future reprocessing possible. This layer is a discipline more than a tool, and it's never optional.
+
+**Transformation as shared medallion tables, instead of every consumer cleaning for itself.** Without a transformation layer, each dashboard, model, and query re-derives its own cleaning and business logic, and those copies drift until two dashboards disagree on revenue and nobody can say which is right. Building Bronze to Silver to Gold once, in one place, is what makes a number trustworthy. Skippable only if your raw data is already clean and modeled, which it never is.
+
+**Streaming, instead of running batch more often.** The simpler answer to "we need it fresher" is to run the batch job every 15 minutes. That covers a surprising amount of "real-time" requests. Streaming earns its extra operational cost (unbounded state, late and out-of-order events, checkpoints, exactly-once handling) only when freshness genuinely matters in seconds: fraud, live ops, alerting. This is the most deferrable layer. Add it for the specific pipelines that need it, not by default.
+
+**Orchestration, instead of cron.** You can start a pipeline with cron and a shell script. It breaks the first time step three depends on step two finishing, or a task fails at 3am and everything downstream runs on stale data with no alert. An orchestrator runs tasks in dependency order with retries, backfills, and visibility into what failed and why. Optional while you're building by hand; not optional once the pipeline has to run reliably without you watching it.
+
+**Serving through the catalog, instead of exporting copies.** The naive way to get data to a BI tool or another engine is to export it, which spawns duplicate tables that immediately start drifting from the source. In an open lakehouse this layer is nearly free: it's the same catalog you already stood up, now pointed at by more engines reading the same tables in place. Not optional the moment anyone besides your own pipeline needs the data.
+
+**AI on the governed tables, instead of a separate ML data pile.** Optional entirely, and only relevant if you have a model to train. The point when you do have one is that the same clean, versioned Gold tables that serve BI also serve training, from a single source, with reproducibility for free, instead of maintaining a parallel dataset that no longer matches production.
+
+**Agents, instead of a human at the CLI.** The newest and most optional layer: an LLM driving the platform through its command-line surface. The lasting lesson isn't the agent itself, it's that the properties that make a system agent-operable (one clean control surface, machine-readable status, documented procedures) are the same ones that make it pleasant for a human on call. Skip it and you lose nothing structural.
+
+The pattern worth internalizing: the lower layers are mandatory and the upper layers are increasingly optional. Storage, table format, and ingestion are non-negotiable. Compute and transformation are near-mandatory. Streaming, orchestration, serving, AI, and agents are things you add when a real need crosses the breaking point described above. Build the floor first, and add each upper floor when someone is actually going to live on it.
+
+## 1.5 Decision 1. Table format: Iceberg, Delta, or Hudi?
 
 **The call: Apache Iceberg, unless your org is all-in on Databricks, in which case Delta.**
 
@@ -69,7 +105,7 @@ This is the decision that's genuinely hard to reverse, because it dictates how e
 
 > **Production gate, do this in week one and not month three:** write a 10-row table in your chosen format and read it from every consumer you'll have (Spark, your BI tool, DuckDB, whatever). If any consumer can't read it today, you've found a problem while it's cheap to fix. This course uses Iceberg.
 
-## 1.5 Decision 2. Catalog: where does table metadata live?
+## 1.6 Decision 2. Catalog: where does table metadata live?
 
 **The call: a REST catalog, Unity Catalog OSS, from day one. Don't start on the Hive metastore.**
 
@@ -82,7 +118,7 @@ The catalog is the service that answers "what tables exist, and where are their 
 
 > **Production gate:** your catalog is a critical, stateful service. Decide now where its metadata database (Postgres) lives and how it's backed up. A lost catalog means "my files exist but nothing knows they're tables." Treat it like the production database it is.
 
-## 1.6 Decision 3. Object store: where do the bytes live?
+## 1.7 Decision 3. Object store: where do the bytes live?
 
 **The call: S3 in production; run SeaweedFS (or MinIO) locally to build against the same S3 API.**
 
@@ -94,7 +130,7 @@ Object storage is the cheap, effectively infinite foundation. The important prac
 
 We go deep on this in Chapter 3, including why object storage's quirks (no real folders, no in-place edits) shape everything above it. For now the decision is: S3-API everywhere, a light local store for the build.
 
-## 1.7 Decision 4. Compute, and how you talk to it
+## 1.8 Decision 4. Compute, and how you talk to it
 
 **The call: Apache Spark, driven by Spark Connect (`sc://`), not the classic embedded driver.**
 
@@ -102,7 +138,7 @@ Spark is the workhorse that ingests, transforms, and streams. The decision that 
 
 Why it's the modern default, in one breath: thin clients, connect from anywhere with one URL, and the headline win, isolation, so one bad job can't take down the shared cluster. The trade-off you accept: the DataFrame/SQL surface only (no low-level RDD internals), and static config must be set server-side. Full treatment in Chapter 4. The newer Spark Declarative Pipelines (Chapter 7) are built on Connect, so choosing it now pays off later.
 
-## 1.8 Decision 5. Batch, streaming, or both on day one?
+## 1.9 Decision 5. Batch, streaming, or both on day one?
 
 **The call: batch first. Add streaming only when a real freshness requirement demands it, and be suspicious of "real-time" requirements.**
 
@@ -112,7 +148,7 @@ Ship the batch medallion first (Chapters 6-7). It's simpler, easier to make idem
 
 > **Production gate:** for every "real-time" requirement, write down the actual tolerated latency and who needs it. Half will collapse into "batch is fine," and you'll have saved yourself an operational burden.
 
-## 1.9 Decision 6. Self-hosted vs. managed: who runs this?
+## 1.10 Decision 6. Self-hosted vs. managed: who runs this?
 
 **The call: prototype self-hosted (this course), then decide managed-vs-self per component for production based on your team's operational capacity.**
 
@@ -120,7 +156,7 @@ Everything you build here is self-hosted, which is perfect for learning the guts
 
 Because you build on open standards, this isn't a one-way door. Your Iceberg tables, Spark jobs, SDP pipelines, and Airflow DAGs port to managed services as a lift, not a rewrite. So the pragmatic path is: build it yourself to understand it, then move the pieces your team can't afford to operate onto managed services, keeping the open formats so you're never locked in. Chapter 13 tours the cloud and Terraform path.
 
-## 1.10 The through-line: one real dataset, carried all the way
+## 1.11 The through-line: one real dataset, carried all the way
 
 To keep this concrete instead of abstract, the whole build uses one realistic dataset: a stream of e-commerce order events. You'll land them raw, clean and conform them, aggregate them into business tables, schedule the pipeline, serve them to multiple engines, train a model on them, and finally let an agent operate the whole thing. One honest dataset (messy, continuous, aggregatable, with signal to learn from) exercises every layer the way real work does.
 
@@ -128,7 +164,7 @@ To keep this concrete instead of abstract, the whole build uses one realistic da
 
 **Figure 1.5**. The order event's path across the layers: this is the data you'll follow from raw landing to business metric to model.
 
-## 1.11 Your week-one sequence
+## 1.12 Your week-one sequence
 
 Decisions made, here's the order I'd actually execute in. Each step is a chapter, and each ends with something you can verify:
 
@@ -144,21 +180,21 @@ Decisions made, here's the order I'd actually execute in. Each step is a chapter
 
 Bottom-up, because each layer is only testable once the one beneath it works.
 
-## 1.12 Production-readiness checklist for architecture decisions
+## 1.13 Production-readiness checklist for architecture decisions
 
 Every chapter from here ends with the bare minimum to call this layer production-ready. For the architecture itself:
 
 - [ ] **Lakehouse justified:** you can name the two-plus reasons you need one (§1.2).
-- [ ] **Table format chosen and proven:** a test table reads from every consumer you'll have (§1.4).
-- [ ] **Catalog chosen:** REST catalog, with a decision on where its metadata DB lives and how it's backed up (§1.5).
-- [ ] **Object store strategy:** S3-API everywhere; local store selected (§1.6).
-- [ ] **Compute transport:** Spark Connect, with awareness of the server-side-config constraint (§1.7).
-- [ ] **Streaming scoped honestly:** each "real-time" need has a written latency SLA; batch-first otherwise (§1.8).
-- [ ] **Self-host vs. managed:** a per-component plan for production, open formats preserved so migration is a lift (§1.9).
+- [ ] **Table format chosen and proven:** a test table reads from every consumer you'll have (§1.5).
+- [ ] **Catalog chosen:** REST catalog, with a decision on where its metadata DB lives and how it's backed up (§1.6).
+- [ ] **Object store strategy:** S3-API everywhere; local store selected (§1.7).
+- [ ] **Compute transport:** Spark Connect, with awareness of the server-side-config constraint (§1.8).
+- [ ] **Streaming scoped honestly:** each "real-time" need has a written latency SLA; batch-first otherwise (§1.9).
+- [ ] **Self-host vs. managed:** a per-component plan for production, open formats preserved so migration is a lift (§1.10).
 
 If every box is checked, you have a defensible architecture you could put in a design doc and hand to your team. That's the deliverable of this chapter.
 
-## 1.13 Recap & what's next
+## 1.14 Recap & what's next
 
 - The hard-to-reverse decisions are table format and catalog. Make those deliberately; the rest are cheaper to change.
 - Default to Iceberg plus Unity Catalog OSS (REST) plus S3-API storage plus Spark Connect, batch-first, self-host-to-learn and managed-where-you-must, and deviate only with a reason.
