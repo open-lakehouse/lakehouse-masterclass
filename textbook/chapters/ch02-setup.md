@@ -1,345 +1,170 @@
-# Chapter 2 — Setup: Prerequisites and the Control CLI
+# Chapter 2: Setup
 
-## 2.0 What you'll build
+Chapter 1 was decisions. This is where you start running things. By the end you'll have the foundation in place on your machine: the tools installed, the project laid out, and Docker confirmed working, ready to add the first service to.
 
-A working environment and the one tool you'll use to drive everything else: the
-`./lakehouse` control CLI. By the end you'll have the prerequisites installed, the
-project cloned, your configuration in place, and a green `./lakehouse status`.
+A lakehouse is a handful of services (an object store, a Spark cluster, a catalog and its database, and later Kafka and an orchestrator), their configuration, and the wiring that lets them find each other. You're going to build that yourself, one service at a time, so you understand exactly what's running and can fix it when something breaks. The services run as containers, and Docker Compose is what defines and runs them, so that's the tool at the center of this chapter.
 
-This is the chapter with the highest "give up" rate in any hands-on course,
-because environment setup is where enthusiasm meets reality. So we're going to be
-unusually thorough — not because setup is hard, but because a confident setup is
-the difference between enjoying the next eleven chapters and fighting your laptop
-the whole way. Ten extra minutes here saves hours later.
+This chapter does the groundwork the rest of the build stands on: install the prerequisites, lay out the project directory, set up configuration and secrets properly before there are any secrets to leak, and confirm Docker actually works. You won't stand up a lakehouse service yet. That starts in the next chapter with the object store. What you'll have when you finish here is a clean, working foundation to build on.
 
 ![Progress: Setup](../figures/ch02/fig-2.1-progress-setup.svg)
 
-**Figure 2.1** — Progress map with **Setup** highlighted.
+**Figure 2.1**. Progress map with **Setup** highlighted.
 
-## 2.1 Learning objectives
+## Learning objectives
 
-By the end of this chapter you can:
+By the end of this chapter you'll be able to:
 
-- Install the prerequisites (Docker, Java, Python, Poetry) on macOS, Ubuntu, or
-  Windows/WSL2 — and explain what each one is *for*.
-- Explain the two **host-native** dependencies (Postgres and the object store) and
-  why they're not containers.
-- Clone the project and create your `.env` configuration.
-- Use the `./lakehouse` CLI to validate and inspect the stack, and read its status
-  output confidently.
+- Install the prerequisites (Docker with Compose, Python, and the JDK) and say what each one is for in the stack.
+- Explain what Docker and Docker Compose actually give you here: reproducible services defined in a file, rather than software installed by hand on your machine.
+- Lay out a project directory that will hold the service definitions, configuration, and pipeline code you build over the rest of the course.
+- Keep configuration and secrets in a `.env` file that stays out of version control, and explain why that habit matters before you have any real credentials.
+- Confirm your setup works by bringing up a throwaway container with Compose, so you know the pattern the later chapters rely on.
 
-## 2.2 The mental model: one control surface, many services
+## The mental model: services in containers, defined in a file
 
-Before any installs, understand the shape of what you're setting up. A lakehouse
-is not one program — it's *many* independent services (an object store, a Spark
-cluster, a catalog, Kafka, Airflow, and more) that have to be started in the right
-order, pointed at each other, and health-checked. Managing that by hand — a dozen
-`docker` commands, a tangle of ports and environment variables — is exactly the
-kind of error-prone busywork that makes people hate infrastructure.
+A lakehouse is several independent services that have to run at once and find each other: an object store, a Spark cluster, a catalog and its database, and later Kafka and an orchestrator. You could install each one directly on your machine, but that road is painful and you've probably been down it: version conflicts, half-uninstalled leftovers, and a setup that works on your laptop and nowhere else. It also doesn't resemble how any of this runs in production.
 
-So this project follows a principle you'll see in every well-run data platform:
-**there is one control surface, and everything goes through it.** That control
-surface is the `./lakehouse` script. You will almost never type a raw `docker`
-command in this course. Instead you'll say `./lakehouse start spark`,
-`./lakehouse status`, `./lakehouse logs airflow` — and the script translates those
-into the right underlying operations. This is the "infrastructure as a single
-front door" idea, and it's worth internalizing: when a system is complex, the
-kindest thing you can build is a simple, consistent way to drive it.
+So you don't install these services on your host. You run each one as a **container**: a packaged, isolated copy of the software with its own dependencies baked in, that runs the same way on any machine. Docker is what runs containers. That's the first tool you install, and for most of this build it's the only thing that actually touches your host system. The object store, Spark, the catalog, Kafka, they all run as containers on top of Docker, so your machine stays clean and every reader ends up with the same stack.
 
-### Under the hood — this is "infrastructure as code," in miniature
+Running one container by hand is a long command with a lot of flags. Running six of them, wired together with shared networks and consistent settings, is unmanageable that way. That's what **Docker Compose** solves. Compose lets you describe your services in a single file, `docker-compose.yml`, one block per service, saying which image it runs, what ports it exposes, and how it connects to the others. Then one command brings the whole set up, and another tears it down. The file is the source of truth: it's readable, you keep it in version control, and it *is* your infrastructure, written down rather than assembled by memory.
 
-The `./lakehouse` script plus the per-service Docker Compose files *are* your
-infrastructure, written down as code you can read, version, and re-run. There's no
-click-here-then-there ritual to remember and no "works on my machine" mystery —
-the environment is defined in files, so anyone who clones the repo gets the exact
-same stack. That's the whole promise of infrastructure-as-code, and you get it for
-free just by using the CLI instead of running things by hand.
+That is the pattern for the rest of the course. Each chapter adds one service to this Compose file, brings it up, and confirms it's healthy, so by the end you have the whole stack described in one file you wrote and understand line by line. This chapter just gets Docker and Compose in place and proves they work.
 
-## 2.3 Prerequisites (be honest about hardware)
+## Prerequisites
 
-This whole lakehouse runs on your machine, so set expectations up front. This is
-real distributed-systems software running locally; it is not lightweight.
+The point of running everything in containers is that your host stays clean, so the list of things you install directly is short. Three tools:
 
-**Table 2.1** — Hardware and software:
+- **Docker, with the Compose plugin.** This is the one that matters. It runs every service in the stack. Install Docker Desktop on macOS or Windows, or Docker Engine on Linux; recent versions include Compose as `docker compose`. Everything else in the course runs on top of this.
+- **Python 3.10 or newer.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day.
+- **Git.** To version your project: the Compose file, config, and pipeline code you build. Assume you have it; if not, install it.
 
-| Resource | Minimum | Recommended |
-|---|---|---|
-| RAM | 8 GB | 16 GB |
-| Disk | 20 GB free | 50 GB free |
-| CPU | 4 cores | 8 cores |
+Notice what's *not* here. You don't install Spark, or a JVM, or a database on your host. Spark is a JVM application, but its Java lives inside the Spark container you'll define in the Compute chapter, so there's nothing to set up for it now. The catalog's database is a container too. Keeping these off your host is the whole point of the container approach: the only things touching your machine are Docker, Python, and Git.
 
-At 8 GB you can run the stack, but you'll want to start services one at a time and
-stop what you're not using (the CLI makes this easy). At 16 GB the whole thing runs
-comfortably at once. If you're near the minimum, that's fine — the course is
-designed so you only ever *need* a few services running for any given chapter.
+A note on hardware, because this is real distributed-systems software running locally. Plan for around 16 GB of RAM to run the full stack comfortably; 8 GB works if you bring services up one at a time and stop what you're not using, which the one-service-per-chapter structure makes easy. Give Docker a generous memory allowance in its settings (on Docker Desktop, under Resources), since the default is often too low for Spark. Budget 20 to 50 GB of free disk for container images and data.
 
-Software to install first, and — importantly — *why each one*:
+On operating systems: macOS, Linux, and Windows via WSL2 all work. On Windows, do everything inside your WSL2 Linux shell and treat it as Linux; don't run the stack from PowerShell directly, since the tooling assumes a Unix shell.
 
-- **Docker** (with Docker Compose) — runs the services. Nearly every component
-  (Spark, Kafka, Airflow, the catalog) runs in a container so you don't have to
-  install each one natively. Docker is the engine that runs those containers.
-- **Java 17+** (Java **21** is required for Spark 4.1, our default) — Spark is a
-  JVM application. Even though you'll mostly *drive* Spark from Python, the engine
-  itself runs on Java, so the right Java version has to be present.
-- **Python 3.10+** — the language of the pipelines, the test-data generator, and
-  the tooling. It's also how you talk to Spark (via the Spark Connect client in
-  Chapter 4).
-- **Poetry** — Python dependency management. It reads the project's declared
-  dependencies and installs the exact, consistent set into an isolated environment,
-  so you don't pollute your system Python or fight version conflicts.
-
-Supported operating systems: **macOS**, **Ubuntu/Debian**, and **Windows via
-WSL2**. On Windows, do everything inside your WSL2 Linux shell — treat it as Ubuntu.
-Do **not** try to run the stack from Windows PowerShell directly; the tooling
-assumes a Unix shell, and WSL2 gives you exactly that.
-
-### Installing on each OS
-
-The exact commands vary, but the shape is the same everywhere. Rough guide:
-
-- **macOS:** install [Docker Desktop](https://www.docker.com/products/docker-desktop/),
-  then use Homebrew for the rest: `brew install openjdk@21 python@3.12 poetry`.
-  In Docker Desktop's settings, give it at least 8 GB of memory (Settings →
-  Resources) — the default is often too low for Spark.
-- **Ubuntu/Debian:** install Docker Engine and the Compose plugin from Docker's
-  official apt repository, then `sudo apt install openjdk-21-jdk python3.12` and
-  install Poetry with its official installer script.
-- **Windows (WSL2):** install WSL2 with an Ubuntu distribution, enable the WSL2
-  backend in Docker Desktop, then follow the Ubuntu steps *inside* your WSL2 shell.
-
-After installing, sanity-check each tool exists before going further:
+After installing, confirm the tools are present:
 
 ```bash
 docker --version
-java -version      # should report 21.x for the default Spark 4.1
-python3 --version  # 3.10 or newer
-poetry --version
+docker compose version
+python3 --version
+git --version
 ```
 
-If any of these four commands errors or reports the wrong version, stop and fix it
-now — the CLI's own checks in section 2.6 will fail otherwise, and it's much easier
-to diagnose one missing tool here than to untangle a half-configured stack later.
+If any of these errors, fix it before going further. A missing tool is far easier to diagnose now than halfway through bringing up your first service.
 
-### Under the hood — two dependencies that are NOT containers
+## Lay out the project
 
-Most of the stack runs in Docker, but **two foundational services run natively on
-your host**: **PostgreSQL** (the catalog's metadata database) and the **object
-store** (covered in Chapter 3). The containers reach them over
-`host.docker.internal`, a special hostname that means "the host machine, from
-inside a container."
-
-Why not containerize these too? Two reasons. First, they're the most
-*stateful* parts of the system — the things you least want to accidentally destroy
-when you tear down containers — so keeping them on the host protects your data.
-Second, running them natively mirrors how real deployments work: your object store
-and your metadata database are almost always *external managed services*, not part
-of your compute cluster.
-
-This design trips up a lot of beginners — if a container can't find its database,
-it's almost always because Postgres isn't running on the host, or
-`host.docker.internal` isn't resolving. We call this out again in Chapter 3,
-because it's the single most common setup snag. Commit it to memory now: **when a
-service can't reach its dependency, check the two host-native services first.**
-
-## 2.4 Get the code
+You're building this from nothing, so start with an empty directory and put it under version control:
 
 ```bash
-git clone <the-course-companion-repo>.git
-cd <companion-repo>
+mkdir open-lakehouse && cd open-lakehouse
+git init
 ```
 
-The project root contains the `./lakehouse` script — your control surface for the
-entire course — plus per-service Docker Compose files, the pipelines, and the
-test-data generator. Take a moment to look around: `ls` the root and skim the
-top-level folders. You don't need to understand it all yet, but knowing roughly
-where things live pays off when a later chapter says "edit the pipeline
-definition" and you already have a sense of the layout.
-
-## 2.5 Configure your environment
-
-The project ships an example environment file. Copy it and fill in the blanks.
+You'll grow a specific structure over the course, but a little intention now saves cleanup later. Create these top-level folders:
 
 ```bash
-cp .env.example .env
+mkdir compose config pipelines data
 ```
 
-Open `.env` and set the credentials. The important variables you'll see:
+What each is for:
 
-**Table 2.2** — Key environment variables (Storage credentials, detailed in Ch 3):
+- **`compose/`** holds the service definitions. You can keep everything in one `docker-compose.yml` at the root, but as the stack grows it's cleaner to split it, one file per service, and combine them. Either way, this is where your infrastructure lives.
+- **`config/`** holds service configuration that isn't secret: the settings files each service reads. It gets populated as you add services.
+- **`pipelines/`** is where your data pipelines will live. You won't hand-build its internal structure: in the Transformation chapter you'll run Spark Declarative Pipelines' own initializer (`spark-pipelines init --name <project>`), which scaffolds a project subdirectory here containing a `spark-pipeline.yml` spec and a `transformations/` folder with example definitions. For now it's just an empty home waiting for that.
+- **`data/`** is a local scratch space for sample data and anything you don't want committed.
 
-| Variable | Purpose |
-|---|---|
-| `S3_ENDPOINT` | Where the object store listens (e.g. `http://host.docker.internal:8333`) |
-| `S3_ACCESS_KEY` / `S3_SECRET_KEY` | Object-store credentials |
-| `S3_BUCKET` | The bucket name (e.g. `lakehouse`) |
-| `S3_WAREHOUSE` | The warehouse path (e.g. `s3a://lakehouse/warehouse`) |
-| `POSTGRES_*` | Catalog metadata database connection |
+None of this is load-bearing yet. The point is that you have a home for each kind of thing you'll create, so when a later chapter says "add the Spark service" or "initialize the pipeline project," you already know where it goes. We'll create the actual `docker-compose.yml` in the next chapter, when there's a first service to put in it.
 
-Notice that `S3_ENDPOINT` uses `host.docker.internal` — that's the host-native
-object store from the last section. The value you put here is the same address the
-Spark containers will use to reach storage, which is why consistency between
-`.env` and the Spark config matters (the CLI checks exactly this in section 2.6).
+## Configuration and secrets
 
-> Security note: `.env` holds secrets and is gitignored. Never commit it. This is
-> the course's first **security** practice — keep credentials out of version
-> control. It's a small habit that prevents a very large class of real-world
-> disasters (leaked keys in public repos are one of the most common security
-> incidents in the industry).
+Services need configuration, and some of it is sensitive: access keys, database passwords. The rule you adopt now, before you have a single real credential, is that secrets never go in version control. Getting this habit in place while the stakes are zero is the point; it's much harder to retrofit after a key has already been committed and lives in your git history forever.
 
-## 2.6 Meet the control CLI
+Two kinds of configuration, kept separate:
 
-Everything in this course runs through one command. Get its help first:
+- **Non-secret config** (ports, service names, non-sensitive settings) can live in files you commit, so anyone with your project gets a working setup.
+- **Secrets** (credentials, keys) go in a single `.env` file that you never commit. Services and Compose read values from it at startup.
+
+Create the `.env` file and, in the same breath, make sure git will ignore it:
 
 ```bash
-./lakehouse help
+touch .env
+echo ".env" >> .gitignore
+echo "data/" >> .gitignore
+git add .gitignore
+git commit -m "Ignore secrets and local data"
 ```
 
-**Table 2.3** — The commands you'll use most:
+That is deliberately the first thing you commit: the rule that keeps secrets out. The `.env` file is empty for now; you'll add values to it as you bring up services that need credentials, starting with the object store's access keys in the next chapter. Compose automatically reads a `.env` file sitting next to your `docker-compose.yml`, so any variable you define there is available to your service definitions without extra wiring.
 
-| Command | What it does |
-|---|---|
-| `./lakehouse setup` | Validate the environment and install dependencies (downloads Spark JARs) |
-| `./lakehouse check-config` | Validate credentials are consistent between `.env` and Spark config |
-| `./lakehouse preflight` | Run pre-start checks |
-| `./lakehouse status` | Show the health of every service (add `--json` for machine output) |
-| `./lakehouse start [service]` | Start a service (`spark`, `kafka`, `airflow`, `unity-catalog`, `all`) |
-| `./lakehouse stop [service]` | Stop a service |
-| `./lakehouse logs [service]` | Tail a service's logs |
-| `./lakehouse testdata <cmd>` | Generate / stream / load / inspect test data |
+One habit worth adopting alongside this: commit an example file, `.env.example`, that lists the *names* of the variables with placeholder values, and do commit that one. It documents what configuration the project expects without exposing any real secret, so someone setting up the project later knows exactly what to fill in.
 
-Two commands deserve special mention because you'll lean on them constantly:
+## Prove it works
 
-- **`./lakehouse status`** is your dashboard. Any time something feels off, this is
-  the first thing to run. It tells you which services are up, which are down, and
-  which are unhealthy. Its `--json` mode is handy when you want to check status
-  from a script.
-- **`./lakehouse logs [service]`** is your debugger. When a service is unhealthy,
-  its logs almost always say why. Getting comfortable reading logs is one of the
-  most valuable habits in all of data engineering — the answer is nearly always in
-  there.
+You won't stand up a real lakehouse service yet, that starts next chapter, but before you finish here you want proof that Docker and Compose actually run on your machine. It's worth catching a broken Docker install now, with a trivial throwaway service, rather than while you're also trying to learn the object store.
 
-> Note the `--version 4.0|4.1` option: it selects the Spark version. We use the
-> default (**4.1**, on Java 21) throughout, because it's the version with the
-> modern Spark Connect and Declarative Pipelines features this course leans on.
+Create a temporary `docker-compose.yml` at the project root with a single tiny service:
 
-## 2.7 Build — bring the environment up to "ready"
+```yaml
+services:
+  hello:
+    image: hello-world
+```
 
-Step 1 — validate and install:
+Bring it up:
 
 ```bash
-./lakehouse setup
+docker compose up
 ```
 
-Expected: environment checks pass (Docker, Java, Python, Poetry found), Python
-dependencies install, and the Spark JARs download (this is a large, one-time
-network step — be patient; it can take several minutes on a normal connection).
+You should see Docker pull the `hello-world` image and print a "Hello from Docker!" message confirming your installation is working, then the container exits. If you see that message, Docker can pull images and Compose can read your file and run a service, which is everything the rest of the course depends on.
 
-**What just happened?** `setup` did three things: confirmed your four prerequisites
-are present and the right versions, used Poetry to install the project's Python
-dependencies into an isolated environment, and downloaded the Spark engine plus the
-connector JARs (the plugins that let Spark talk to the object store and Iceberg).
-Those JARs are large, which is why this step is slow the first time and instant
-afterward.
-
-Step 2 — confirm configuration is consistent:
+Now tear it down and remove the throwaway file:
 
 ```bash
-./lakehouse check-config
+docker compose down
+rm docker-compose.yml
 ```
 
-Expected: credentials in `.env` and the Spark config agree; no mismatches reported.
-This catches the classic mistake of setting a password in one place but not the
-other — a mismatch here would surface much later as a confusing "access denied"
-when Spark tries to reach storage, so it's worth the ten seconds now.
+You deleted it because the real `docker-compose.yml` gets created in the next chapter with your first actual service, the object store. This one was only ever a smoke test.
 
-Step 3 — check status (nothing started yet):
+**What just happened?** You wrote a service definition in a Compose file, and `docker compose up` read it, pulled the image, and ran the container; `docker compose down` stopped and cleaned it up. That pull, run, stop cycle is the exact pattern every later chapter uses, just with real services and more of them. If it worked for `hello-world`, your foundation is solid.
 
-```bash
-./lakehouse status
-```
+If `docker compose up` failed, the usual causes are: Docker isn't actually running (start Docker Desktop, or `sudo systemctl start docker` on Linux), you're in a Windows PowerShell shell instead of WSL2, or a networking restriction is blocking the image pull. Fix the cause and re-run; don't move on until you see the hello message.
 
-Expected: the CLI lists each service and shows it as not-yet-running. That's fine —
-we start services layer by layer beginning in Chapter 3. Seeing an all-stopped
-status table is actually the *correct* end state for this chapter; you've built the
-control surface, not the services.
-
-## 2.8 Troubleshooting
-
-The most common setup snags and what they mean:
-
-- **`./lakehouse setup` fails on the Java check.** You have Java, but the wrong
-  version, or multiple Javas and the wrong one is first on your `PATH`. Run
-  `java -version`; if it's not 21.x, install/select Java 21. On macOS, Homebrew's
-  `openjdk@21` sometimes needs to be symlinked or added to `PATH` — the install
-  output tells you how.
-- **`docker` command works but `setup` says Docker isn't running.** The Docker CLI
-  is installed but the Docker *daemon/desktop* isn't started. Launch Docker Desktop
-  (macOS/Windows) or `sudo systemctl start docker` (Linux), then retry.
-- **The Spark JAR download stalls or fails.** It's a large download; a flaky
-  connection can interrupt it. Re-run `./lakehouse setup` — it resumes rather than
-  re-downloading everything.
-- **`check-config` reports a mismatch.** A credential differs between `.env` and the
-  Spark config. Re-open `.env`, confirm each value, and re-run. Copy-paste errors in
-  the secret key are the usual culprit.
-- **Everything installs but you're on Windows PowerShell.** Stop — move into your
-  WSL2 Ubuntu shell and run everything there. The tooling needs a Unix shell.
-
-Whenever a step fails, the pattern is the same: read the error, run
-`./lakehouse status` and `./lakehouse logs` to see the details, and fix one thing
-at a time. Resist the urge to change five things at once — you'll lose track of
-what actually fixed it.
-
-## 2.9 Checkpoint
+## Checkpoint
 
 You're ready to move on when:
 
-- `./lakehouse setup` completed without errors.
-- `./lakehouse check-config` reports consistent credentials.
-- `./lakehouse status` runs and prints a service table (all stopped is correct).
-- You know where your `.env` is and that it must never be committed.
-- You can name the two host-native services and say why they're not containers.
+- Docker, Compose, Python, and Git are installed and their version commands all work.
+- You have a project directory under version control, with the `compose/`, `config/`, `pipelines/`, and `data/` folders laid out.
+- Your first commit is a `.gitignore` that excludes `.env` and `data/`, and you understand why secrets stay out of version control.
+- `docker compose up` on the throwaway `hello-world` service printed the hello message, and you tore it back down.
 
-## 2.10 Try it yourself
+## Try it yourself
 
-1. **Read the help end to end.** Run `./lakehouse help` and read every command,
-   even the ones we haven't used. You'll recognize them as we go, and you'll know
-   the tool has more to offer than the handful we lean on.
-2. **Break it on purpose.** Temporarily rename a value in `.env` to something wrong,
-   run `./lakehouse check-config`, and read the error. Then fix it. Deliberately
-   causing (and reading) an error is the fastest way to learn what a healthy state
-   looks like by contrast.
-3. **Inspect the JSON.** Run `./lakehouse status --json` and look at the structure.
-   Imagine you were writing a script to alert you when a service goes down — which
-   field would you check?
-4. **Find the Compose files.** Locate the per-service Docker Compose files in the
-   repo and open one. You don't need to understand every line — just confirm to
-   yourself that "the infrastructure is written down as code," as section 2.2
-   claimed.
+1. **Read a Compose file's shape.** Look up the reference for a `docker-compose.yml` service block and note the common keys (`image`, `ports`, `environment`, `volumes`, `depends_on`). You'll use every one of these as you add real services.
+2. **Break the smoke test on purpose.** Put a typo in the throwaway Compose file (misspell `image`, say), run `docker compose up`, and read the error. Then fix it. Reading a failure now teaches you what a healthy run looks like by contrast.
+3. **Reference a secret from Compose.** Add a line like `GREETING=hello` to your `.env`, then write a tiny Compose service that echoes `${GREETING}`, and confirm the value flows through. This is exactly how service credentials will reach your real services later.
 
-## 2.11 Check your understanding
+## Check your understanding
 
-- Why does this project insist on a single control CLI instead of raw `docker`
-  commands? What does that buy you?
-- Which two services run natively on the host rather than in containers, and what
-  are the two reasons given for that choice?
-- What does `host.docker.internal` mean, and why does the object-store endpoint use
-  it?
-- When a containerized service can't reach its database, what should you check
-  first?
+- Why run each service in a container instead of installing it on your host? Give two concrete reasons.
+- What does Docker Compose add on top of Docker, and why does that matter once you have more than one service?
+- Why is the very first commit a `.gitignore` that excludes `.env`? What problem does that habit prevent?
+- What does the throwaway `hello-world` run actually prove about your setup?
 
-## 2.12 Recap & what's next
+## Recap and what's next
 
-- The stack needs **Docker, Java 21, Python 3.10+, and Poetry**; plan for ~16 GB
-  RAM (8 GB works if you run services one at a time).
-- There is **one control surface** — the `./lakehouse` CLI — and everything goes
-  through it. `status` is your dashboard; `logs` is your debugger.
-- **Postgres and the object store run natively on your host**, not in containers —
-  remember this when debugging.
-- The infrastructure is **written down as code**, so every clone gets the same
-  stack.
-- **Next — Chapter 3, Storage:** start the object store, create the warehouse
-  bucket, and lock in Iceberg as the table format.
+- The only tools on your host are **Docker (with Compose), Python, and Git**; everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
+- Services run as **containers defined in a Compose file**, which is your infrastructure written down: readable, versioned, reproducible.
+- Secrets live in a gitignored **`.env`**, and keeping them out of version control is the first habit you commit.
+- You proved Docker and Compose work with a throwaway service, and laid out a project directory ready for its first real service.
+- **Next, Chapter 3, Storage:** create your first real service, an S3-compatible object store, in the `docker-compose.yml` you'll start for real, and set up the warehouse it holds.
 
 ![Progress: Setup complete, Storage next](../figures/ch02/fig-2.2-progress-setup-done.svg)
 
-**Figure 2.2** — Progress map with **Setup ✓** and **Storage** highlighted next.
+**Figure 2.2**. Progress map with **Setup ✓** and **Storage** highlighted next.
