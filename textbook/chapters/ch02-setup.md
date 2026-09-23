@@ -14,7 +14,7 @@ This chapter does the groundwork the rest of the build stands on: install the pr
 
 By the end of this chapter you'll be able to:
 
-- Install the prerequisites (Docker with Compose, Python, and Git) and say what each one is for in the stack.
+- Install the prerequisites (Docker with Compose, Python, Git, and the AWS CLI) and say what each one is for in the stack.
 - Explain what Docker and Docker Compose actually give you here: reproducible services defined in a file, rather than software installed by hand on your machine.
 - Lay out a project directory that will hold the service definitions, configuration, and pipeline code you build over the rest of the course.
 - Keep configuration and secrets in a `.env` file that stays out of version control, and explain why that habit matters before you have any real credentials.
@@ -69,13 +69,14 @@ Every command in this book is written for a Linux shell (bash, `apt`, and so on)
 
 ## Prerequisites
 
-The point of running everything in containers is that your host stays clean, so the list of things you install directly is short. Three tools:
+The point of running everything in containers is that your host stays clean, so the list of things you install directly is short. Four tools:
 
 - **Docker, with the Compose plugin.** This is the one that matters. It runs every service in the stack, so if you install nothing else, install this. Follow Docker's official install guide for your OS, it's kept current and is the authoritative source: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/), [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) (enable the WSL2 backend when prompted), or [Docker Engine](https://docs.docker.com/engine/install/) on Linux (install the `docker-compose-plugin` package alongside it). A couple of notes the guides don't stress: use `docker compose` (two words, the built-in plugin), not the deprecated standalone `docker-compose`; and on Linux, add your user to the `docker` group so you don't need `sudo` for every command.
 - **Python 3.10 or newer.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day.
 - **Git.** To version your project: the Compose file, config, and pipeline code you build. Assume you have it; if not, install it.
+- **The AWS CLI.** Your object store speaks the S3 API, and the AWS CLI is the standard way to poke at S3 from the command line, create buckets, copy files, list objects, whether the store is Amazon S3 or your local one. Install it with `pip install awscli` or your OS package manager. You'll first use it in the next chapter to talk to your object store.
 
-Notice what's *not* here. You don't install Spark, or a JVM, or a database on your host. Spark is a JVM application, but its Java lives inside the Spark container you'll define in the Compute chapter, so there's nothing to set up for it now. The catalog's database is a container too. Keeping these off your host is the whole point of the container approach: the only things touching your machine are Docker, Python, and Git.
+Notice what's *not* here. You don't install Spark, or a JVM, or a database on your host. Spark is a JVM application, but its Java lives inside the Spark container you'll define in the Compute chapter, so there's nothing to set up for it now. The catalog's database is a container too. Keeping these off your host is the whole point of the container approach: the only things touching your machine are the client tools (Docker, Python, Git, and the AWS CLI), never the services themselves.
 
 A note on hardware, because this is real distributed-systems software running locally. Plan for around 16 GB of RAM to run the full stack comfortably; 8 GB works if you bring services up one at a time and stop what you're not using, which the one-service-per-chapter structure makes easy. Give Docker a generous memory allowance in its settings (on Docker Desktop, under Resources), since the default is often too low for Spark. Budget 20 to 50 GB of free disk for container images and data.
 
@@ -86,6 +87,7 @@ docker --version
 docker compose version
 python3 --version
 git --version
+aws --version
 ```
 
 If any of these errors, fix it before going further. A missing tool is far easier to diagnose now than halfway through bringing up your first service.
@@ -165,7 +167,7 @@ If that command failed, the usual causes are: Docker isn't running (start Docker
 
 You're ready to move on when:
 
-- Docker, Compose, Python, and Git are installed and their version commands all work.
+- Docker, Compose, Python, Git, and the AWS CLI are installed and their version commands all work.
 - You have a project directory under version control, with the `compose/`, `config/`, `pipelines/`, and `data/` folders laid out.
 - Your first commit is a `.gitignore` that excludes `.env` and `data/`, and you understand why secrets stay out of version control.
 - `docker run hello-world` printed the welcome message, confirming Docker can pull and run a container.
@@ -185,7 +187,7 @@ You're ready to move on when:
 
 ## Recap and what's next
 
-- The only tools on your host are **Docker (with Compose), Python, and Git**; everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
+- The only tools on your host are **Docker (with Compose), Python, Git, and the AWS CLI**; everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
 - Services run as **containers defined in a Compose file**, which is your infrastructure written down: readable, versioned, reproducible.
 - Secrets live in a gitignored **`.env`**, and keeping them out of version control is the first habit you commit.
 - You confirmed Docker can pull and run a container, and laid out a project directory ready for its first real service.

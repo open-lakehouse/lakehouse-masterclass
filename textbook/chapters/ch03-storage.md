@@ -67,7 +67,7 @@ Where you run largely dictates the object store, so this is less a free choice t
 - **MinIO** is the common self-hosted, S3-compatible store for on-prem and lab deployments: mature, feature-rich, with erasure coding and replication when it's genuinely holding your data.
 - **SeaweedFS** is a lighter self-hosted S3-compatible store, and it's what this course runs locally.
 
-The honest reason we land on SeaweedFS over MinIO here is not "it's lighter." It's two concrete things. First, licensing: SeaweedFS is under a permissive license, while MinIO's server is AGPL, which some organizations can't take on. Second, and more specific to this stack, SeaweedFS handles S3 presigned-URL host rewriting in a way the catalog's credential vending depends on later: when Unity Catalog OSS vends short-lived, scoped credentials to a reader, the presigned URLs have to resolve correctly from both inside and outside the container network, and SeaweedFS supports that cleanly. That's a real "why we chose this" you can defend, not a preference. Because all three speak the S3 API, the lakehouse you build on SeaweedFS locally runs on Amazon S3 in production by changing an endpoint and some credentials; nothing about your tables or pipelines changes.
+The honest reason we land on SeaweedFS over MinIO here comes down to two concrete things, and neither is raw performance. First, licensing: SeaweedFS is under a permissive (Apache-style) license, while MinIO's server is AGPL, a copyleft license some organizations can't take on for anything they might build around it. That alone rules MinIO out for a lot of teams, so it's worth knowing before you standardize. Second, footprint: SeaweedFS is a single lightweight binary that starts fast and stays out of the way, which is exactly what you want for a local development stack you bring up and tear down constantly. MinIO is the more feature-rich choice when it's genuinely holding your production data (erasure coding, replication, a polished console), so this isn't "SeaweedFS is better," it's "SeaweedFS is the right fit for this course's constraints." Because all three speak the S3 API, the choice barely matters to the rest of the build: the lakehouse you build on SeaweedFS locally runs on Amazon S3 in production by changing an endpoint and some credentials, and nothing about your tables or pipelines changes.
 
 ![Object stores over one S3 API](../figures/ch03/fig-3.3-object-stores.svg)
 
@@ -143,12 +143,20 @@ Step 2. Define the object store as a service. Create `docker-compose.yml` at you
 services:
   seaweedfs:
     image: chrislusf/seaweedfs:3.80
-    command: server -s3 -dir=/data
+    env_file: .env
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /etc/seaweedfs
+        cat > /etc/seaweedfs/s3.json <<EOF
+        {"identities":[{"name":"lakehouse",
+          "credentials":[{"accessKey":"$${S3_ACCESS_KEY}","secretKey":"$${S3_SECRET_KEY}"}],
+          "actions":["Admin","Read","Write","List","Tagging"]}]}
+        EOF
+        exec weed server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data
     ports:
       - "8333:8333"   # S3 API, reachable from your host at localhost:8333
-    environment:
-      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
     volumes:
       - seaweedfs-data:/data
 
@@ -156,7 +164,9 @@ volumes:
   seaweedfs-data:
 ```
 
-A few things to notice, all of them concepts from Chapter 2 made concrete. The image is pinned to a specific version (`3.80`) rather than `latest`, so your stack is reproducible and doesn't drift when a new release lands. The `ports` entry publishes the S3 port so you can reach it from your laptop; other containers won't need that, they'll reach it by service name. The credentials are referenced as `${S3_ACCESS_KEY}`, which Compose reads from your `.env`, so no secret is written into the committed file. And the named volume `seaweedfs-data` is where the bytes actually persist; without it, everything you store vanishes when the container stops.
+There's one subtlety worth stopping on, because it's a real security trap. If you just run `weed server -s3` with no config, SeaweedFS serves its S3 endpoint **wide open**, no credentials required. Passing the access key and secret as plain environment variables does *not* secure it; the S3 server only enforces credentials when you give it an identities config with `-s3.config`. That's what the `entrypoint` above does: it writes a small JSON identities file from your `.env` values at startup, then starts the server pointed at it, so the endpoint actually requires the access key and secret to read or write. This matters even locally, because Chapter 2's whole point was to build good habits before the stakes are real.
+
+The rest is Chapter 2 concepts made concrete. The image is pinned to a specific version (`3.80`) rather than `latest`, so your stack is reproducible and doesn't drift when a new release lands. The `env_file: .env` line loads your credentials into the container's environment, and the `$${...}` escaping tells Compose to leave those references alone so the container's own shell expands them at startup, which keeps the secret in your environment rather than baked into the committed Compose file. The `ports` entry publishes the S3 port so you can reach it from your laptop; other containers won't need that, they'll reach it by service name. And the named volume `seaweedfs-data` is where the bytes actually persist; without it, everything you store vanishes when the container stops.
 
 Step 3. Bring it up:
 
@@ -167,11 +177,15 @@ docker compose ps
 
 Expected: `docker compose ps` shows the `seaweedfs` service running. The `-d` flag runs it in the background (detached), so you get your shell back; this is the normal way to run long-lived services, unlike the foreground `hello-world` run in Chapter 2.
 
-Step 4. Create the warehouse bucket and round-trip a file. Point any S3 client at the published endpoint. Using the AWS CLI:
+Step 4. Create the warehouse bucket and round-trip a file. Point any S3 client at the published endpoint. Using the AWS CLI (installed in Chapter 2):
 
 ```bash
 export AWS_ACCESS_KEY_ID=lakehouse
 export AWS_SECRET_ACCESS_KEY=lakehouse-secret
+export AWS_DEFAULT_REGION=us-east-1
+
+# custom S3 endpoints need path-style addressing, not virtual-host style
+aws configure set default.s3.addressing_style path
 
 # create the bucket your tables will live in
 aws --endpoint-url http://localhost:8333 s3 mb s3://lakehouse
@@ -183,6 +197,8 @@ aws --endpoint-url http://localhost:8333 s3 ls s3://lakehouse/test/
 aws --endpoint-url http://localhost:8333 s3 cp s3://lakehouse/test/hello.txt /tmp/back.txt
 cat /tmp/back.txt   # -> hello lakehouse
 ```
+
+Two settings there aren't optional against a local endpoint. The AWS CLI insists on a region even when it's meaningless here, so `AWS_DEFAULT_REGION` keeps it from erroring. And `path` addressing matters because the CLI defaults to virtual-host style (`bucket.localhost`), which doesn't resolve for a local store; path style (`localhost:8333/bucket`) is what SeaweedFS and MinIO expect.
 
 **What just happened?** You talked to your local object store using the same AWS CLI you'd use against real Amazon S3; the only difference is `--endpoint-url` pointing at your laptop instead of AWS. That's the S3-API promise made concrete: one tool, one command shape, whether the store is on your machine or in the cloud. You created the bucket your tables will eventually live in, and you proved the fundamental contract, put bytes in, get the same bytes out. There are no tables yet, and that's correct: you built the container they'll live in, not the tables themselves.
 
@@ -198,7 +214,8 @@ Step back and look at what you've actually stood up. It's one service, but it's 
 
 - **`docker compose ps` doesn't show seaweedfs running.** Check `docker compose logs seaweedfs`. A common cause is that the published port `8333` is already in use by something else; change the host side of the mapping (for example `"8433:8333"`) and reach it there.
 - **`aws s3 ls` gives "Could not connect to the endpoint."** The service isn't up, or you're pointed at the wrong address. From your host shell use `localhost:8333`; `seaweedfs:8333` only resolves from inside the Compose network.
-- **"Access Denied" listing the bucket.** The credentials the AWS CLI is using don't match the ones SeaweedFS started with. Confirm the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in your shell match `S3_ACCESS_KEY` / `S3_SECRET_KEY` in `.env`.
+- **"Access Denied" listing the bucket.** The credentials the AWS CLI is using don't match the ones SeaweedFS started with. Confirm the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in your shell match `S3_ACCESS_KEY` / `S3_SECRET_KEY` in `.env`. If a `List` or `PutObject` is refused even though the keys match, check the `actions` in the identities config include `List`, `Write`, and `Tagging`.
+- **The bucket hostname won't resolve, or you get an `InvalidAccessKeyId` / signature error you can't explain.** You're almost certainly missing the region and path-style settings from Step 4. Run `aws configure set default.s3.addressing_style path` and export `AWS_DEFAULT_REGION`, then retry; virtual-host addressing (`bucket.localhost`) does not work against a local endpoint.
 - **Your data vanished after a restart.** You almost certainly omitted the named volume, or ran `docker compose down -v`, which deletes volumes. `down` alone keeps your data; `down -v` wipes it. That `-v` is a real footgun on a stack holding data you care about.
 
 ## Checkpoint
