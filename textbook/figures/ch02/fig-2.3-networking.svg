@@ -8,27 +8,27 @@
   <text x="230" y="196" fill="#f8fafc" font-size="24" font-weight="700" text-anchor="middle">Your laptop (host)</text>
   <text x="230" y="230" fill="#94a3b8" font-size="16" text-anchor="middle">browser, local client</text>
   <rect x="120" y="256" width="220" height="46" rx="8" fill="#0f172a" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="230" y="285" fill="#fbbf24" font-size="17" font-family="monospace" text-anchor="middle">localhost:9000</text>
+  <text x="230" y="285" fill="#fbbf24" font-size="17" font-family="monospace" text-anchor="middle">localhost:8333</text>
 
   <!-- Compose network boundary -->
   <rect x="470" y="130" width="730" height="470" rx="20" fill="#0b1120" stroke="#334155" stroke-width="2" stroke-dasharray="8 6"/>
   <text x="835" y="164" fill="#64748b" font-size="20" font-weight="700" text-anchor="middle">Compose network (private)</text>
 
-  <!-- minio service -->
+  <!-- seaweedfs service -->
   <rect x="520" y="210" width="280" height="150" rx="16" fill="#1e293b" stroke="#0ea5e9" stroke-width="2"/>
-  <text x="660" y="256" fill="#f1f5f9" font-size="24" font-weight="700" text-anchor="middle">minio</text>
+  <text x="660" y="256" fill="#f1f5f9" font-size="24" font-weight="700" text-anchor="middle">seaweedfs</text>
   <text x="660" y="286" fill="#94a3b8" font-size="15" text-anchor="middle">object store service</text>
   <rect x="560" y="306" width="200" height="38" rx="8" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/>
-  <text x="660" y="331" fill="#38bdf8" font-size="15" font-family="monospace" text-anchor="middle">container port 9000</text>
+  <text x="660" y="331" fill="#38bdf8" font-size="15" font-family="monospace" text-anchor="middle">container port 8333</text>
 
   <!-- spark service -->
   <rect x="870" y="210" width="280" height="150" rx="16" fill="#1e293b" stroke="#3b82f6" stroke-width="2"/>
   <text x="1010" y="256" fill="#f1f5f9" font-size="24" font-weight="700" text-anchor="middle">spark</text>
   <text x="1010" y="286" fill="#94a3b8" font-size="15" text-anchor="middle">compute service</text>
   <rect x="910" y="306" width="200" height="38" rx="8" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
-  <text x="1010" y="331" fill="#60a5fa" font-size="15" font-family="monospace" text-anchor="middle">reads from minio</text>
+  <text x="1010" y="331" fill="#60a5fa" font-size="15" font-family="monospace" text-anchor="middle">reads from seaweedfs</text>
 
-  <!-- Arrow: container to container (spark -> minio, by service name) -->
+  <!-- Arrow: container to container (spark -> seaweedfs, by service name) -->
   <defs>
     <marker id="arrowblue" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L8,3 L0,6 Z" fill="#60a5fa"/>
@@ -39,13 +39,13 @@
   </defs>
   <line x1="870" y1="285" x2="805" y2="285" stroke="#60a5fa" stroke-width="3" marker-end="url(#arrowblue)"/>
   <text x="835" y="405" fill="#60a5fa" font-size="16" font-weight="600" text-anchor="middle">container to container</text>
-  <text x="835" y="432" fill="#93c5fd" font-size="16" font-family="monospace" text-anchor="middle">http://minio:9000</text>
+  <text x="835" y="432" fill="#93c5fd" font-size="16" font-family="monospace" text-anchor="middle">http://seaweedfs:8333</text>
   <text x="835" y="458" fill="#64748b" font-size="14" text-anchor="middle">by service name, on the private network</text>
 
   <!-- Arrow: host to container (published port) -->
   <line x1="340" y1="279" x2="515" y2="279" stroke="#fbbf24" stroke-width="3" marker-end="url(#arrowamber)"/>
   <text x="425" y="255" fill="#fbbf24" font-size="15" font-weight="600" text-anchor="middle">published port</text>
-  <text x="425" y="330" fill="#64748b" font-size="13" text-anchor="middle">ports: 9000:9000</text>
+  <text x="425" y="330" fill="#64748b" font-size="13" text-anchor="middle">ports: 8333:8333</text>
 
   <!-- Bottom takeaway -->
   <rect x="520" y="500" width="630" height="72" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
