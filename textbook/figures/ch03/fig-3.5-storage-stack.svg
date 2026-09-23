@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="54" fill="#f8fafc" font-size="38" font-weight="700" text-anchor="middle">The storage stack: three layers, two decisions</text>
+  <text x="640" y="92" fill="#94a3b8" font-size="20" text-anchor="middle">Each layer does a job the others cannot. All three live as ordinary objects in one bucket.</text>
+
+  <!-- LEFT: three stacked layer bands -->
+  <!-- Top band: Iceberg (table format) -->
+  <rect x="70" y="150" width="620" height="130" rx="14" fill="#1e293b" stroke="#3b82f6" stroke-width="2"/>
+  <text x="96" y="188" fill="#f1f5f9" font-size="24" font-weight="700">Iceberg</text>
+  <text x="96" y="216" fill="#93c5fd" font-size="16">table format</text>
+  <text x="96" y="248" fill="#cbd5e1" font-size="15">unit: the table over time</text>
+  <text x="96" y="270" fill="#64748b" font-size="14">snapshots, schema, atomic commits, file pruning</text>
+  <rect x="540" y="168" width="128" height="34" rx="8" fill="#1e3a8a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="604" y="191" fill="#bfdbfe" font-size="15" font-weight="700" text-anchor="middle">DECISION</text>
+
+  <!-- Middle band: Parquet (file format) -->
+  <rect x="70" y="296" width="620" height="130" rx="14" fill="#1e293b" stroke="#f59e0b" stroke-width="2"/>
+  <text x="96" y="334" fill="#f1f5f9" font-size="24" font-weight="700">Parquet</text>
+  <text x="96" y="362" fill="#fbbf24" font-size="16">file format</text>
+  <text x="96" y="394" fill="#cbd5e1" font-size="15">unit: one file</text>
+  <text x="96" y="416" fill="#64748b" font-size="14">columnar layout + footer stats</text>
+  <rect x="524" y="314" width="144" height="34" rx="8" fill="#3f2d0a" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="596" y="337" fill="#fcd34d" font-size="14" font-weight="700" text-anchor="middle">COMES FREE</text>
+
+  <!-- Bottom band: Object store -->
+  <rect x="70" y="442" width="620" height="130" rx="14" fill="#1e293b" stroke="#0ea5e9" stroke-width="2"/>
+  <text x="96" y="480" fill="#f1f5f9" font-size="24" font-weight="700">SeaweedFS / S3</text>
+  <text x="96" y="508" fill="#38bdf8" font-size="16">object store</text>
+  <text x="96" y="540" fill="#cbd5e1" font-size="15">unit: one object (key to bytes)</text>
+  <text x="96" y="562" fill="#64748b" font-size="14">PUT / GET / LIST / DELETE over the S3 API</text>
+  <rect x="540" y="460" width="128" height="34" rx="8" fill="#0c4a6e" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="604" y="483" fill="#bae6fd" font-size="15" font-weight="700" text-anchor="middle">DECISION</text>
+
+  <!-- "sits on top of" arrows between bands -->
+  <text x="380" y="292" fill="#64748b" font-size="13" text-anchor="middle">organizes many files</text>
+  <text x="380" y="438" fill="#64748b" font-size="13" text-anchor="middle">structures the bytes in each file</text>
+
+  <!-- RIGHT: the one bucket holding everything -->
+  <rect x="740" y="150" width="470" height="470" rx="18" fill="#0b1120" stroke="#334155" stroke-width="2"/>
+  <text x="975" y="186" fill="#e2e8f0" font-size="22" font-weight="700" text-anchor="middle">one bucket: s3://lakehouse</text>
+  <text x="975" y="210" fill="#64748b" font-size="14" text-anchor="middle">data and metadata are all just objects</text>
+
+  <!-- metadata objects (blue) -->
+  <rect x="770" y="240" width="410" height="44" rx="8" fill="#172554" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="788" y="268" fill="#93c5fd" font-size="15" font-family="monospace">warehouse/orders/metadata/v3.metadata.json</text>
+  <rect x="770" y="294" width="410" height="44" rx="8" fill="#172554" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="788" y="322" fill="#93c5fd" font-size="15" font-family="monospace">warehouse/orders/metadata/snap-*.avro</text>
+  <text x="1155" y="270" fill="#3b82f6" font-size="13" text-anchor="end">Iceberg</text>
+
+  <!-- parquet data objects (amber) -->
+  <rect x="770" y="356" width="410" height="44" rx="8" fill="#3f2d0a" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="788" y="384" fill="#fcd34d" font-size="15" font-family="monospace">warehouse/orders/data/00000-abc.parquet</text>
+  <rect x="770" y="410" width="410" height="44" rx="8" fill="#3f2d0a" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="788" y="438" fill="#fcd34d" font-size="15" font-family="monospace">warehouse/orders/data/00001-def.parquet</text>
+  <rect x="770" y="464" width="410" height="44" rx="8" fill="#3f2d0a" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="788" y="492" fill="#fcd34d" font-size="15" font-family="monospace">warehouse/orders/data/00002-ghi.parquet</text>
+  <text x="1155" y="384" fill="#f59e0b" font-size="13" text-anchor="end">Parquet</text>
+
+  <!-- takeaway inside bucket -->
+  <rect x="770" y="528" width="410" height="70" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <text x="975" y="556" fill="#cbd5e1" font-size="14" text-anchor="middle">The store never knows these files form a table.</text>
+  <text x="975" y="578" fill="#cbd5e1" font-size="14" text-anchor="middle">That knowledge lives in the Iceberg metadata, also in the bucket.</text>
+</svg>

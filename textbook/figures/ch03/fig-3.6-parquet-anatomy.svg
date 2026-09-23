@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="54" fill="#f8fafc" font-size="38" font-weight="700" text-anchor="middle">Inside one Parquet file: columnar layout + footer stats</text>
+  <text x="640" y="92" fill="#94a3b8" font-size="20" text-anchor="middle">Values of one column sit together, so a query reads only the columns and row groups it needs</text>
+
+  <!-- The file container -->
+  <rect x="70" y="140" width="700" height="500" rx="16" fill="#0b1120" stroke="#f59e0b" stroke-width="2"/>
+  <text x="420" y="176" fill="#fbbf24" font-size="22" font-weight="700" text-anchor="middle">00000-abc.parquet</text>
+
+  <!-- Row group 1 -->
+  <rect x="100" y="196" width="640" height="150" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="120" y="224" fill="#e2e8f0" font-size="17" font-weight="700">Row group 1</text>
+  <text x="120" y="246" fill="#64748b" font-size="13">a horizontal slice of rows, stored column by column</text>
+  <!-- column chunks -->
+  <rect x="120" y="258" width="180" height="72" rx="8" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="210" y="284" fill="#38bdf8" font-size="15" font-weight="700" text-anchor="middle">order_id</text>
+  <text x="210" y="308" fill="#64748b" font-size="12" text-anchor="middle">column chunk</text>
+  <text x="210" y="324" fill="#64748b" font-size="12" text-anchor="middle">min/max, nulls</text>
+  <rect x="316" y="258" width="180" height="72" rx="8" fill="#0f172a" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="406" y="284" fill="#4ade80" font-size="15" font-weight="700" text-anchor="middle">order_total</text>
+  <text x="406" y="308" fill="#64748b" font-size="12" text-anchor="middle">column chunk</text>
+  <text x="406" y="324" fill="#64748b" font-size="12" text-anchor="middle">min/max, nulls</text>
+  <rect x="512" y="258" width="208" height="72" rx="8" fill="#0f172a" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="616" y="284" fill="#c084fc" font-size="15" font-weight="700" text-anchor="middle">order_date</text>
+  <text x="616" y="308" fill="#64748b" font-size="12" text-anchor="middle">column chunk</text>
+  <text x="616" y="324" fill="#64748b" font-size="12" text-anchor="middle">min/max, nulls</text>
+
+  <!-- Row group 2 -->
+  <rect x="100" y="360" width="640" height="150" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="120" y="388" fill="#e2e8f0" font-size="17" font-weight="700">Row group 2</text>
+  <text x="120" y="410" fill="#64748b" font-size="13">same columns, the next slice of rows</text>
+  <rect x="120" y="422" width="180" height="72" rx="8" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="210" y="448" fill="#38bdf8" font-size="15" font-weight="700" text-anchor="middle">order_id</text>
+  <text x="210" y="472" fill="#64748b" font-size="12" text-anchor="middle">column chunk</text>
+  <text x="210" y="488" fill="#64748b" font-size="12" text-anchor="middle">min/max, nulls</text>
+  <rect x="316" y="422" width="180" height="72" rx="8" fill="#0f172a" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="406" y="448" fill="#4ade80" font-size="15" font-weight="700" text-anchor="middle">order_total</text>
+  <text x="406" y="472" fill="#64748b" font-size="12" text-anchor="middle">column chunk</text>
+  <text x="406" y="488" fill="#64748b" font-size="12" text-anchor="middle">min/max, nulls</text>
+  <rect x="512" y="422" width="208" height="72" rx="8" fill="#0f172a" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="616" y="448" fill="#c084fc" font-size="15" font-weight="700" text-anchor="middle">order_date</text>
+  <text x="616" y="472" fill="#64748b" font-size="12" text-anchor="middle">column chunk</text>
+  <text x="616" y="488" fill="#64748b" font-size="12" text-anchor="middle">min/max, nulls</text>
+
+  <!-- Footer -->
+  <rect x="100" y="524" width="640" height="94" rx="12" fill="#3f2d0a" stroke="#f59e0b" stroke-width="2"/>
+  <text x="120" y="552" fill="#fbbf24" font-size="17" font-weight="700">Footer</text>
+  <text x="120" y="578" fill="#cbd5e1" font-size="14">schema + per-row-group, per-column statistics (min, max, null count)</text>
+  <text x="120" y="602" fill="#64748b" font-size="13">a reader opens the footer first to decide what it can skip</text>
+
+  <!-- RIGHT: what this buys -->
+  <rect x="800" y="196" width="410" height="200" rx="14" fill="#1e293b" stroke="#22c55e" stroke-width="2"/>
+  <text x="820" y="230" fill="#4ade80" font-size="19" font-weight="700">Column projection</text>
+  <text x="820" y="260" fill="#cbd5e1" font-size="15">SELECT order_total ...</text>
+  <text x="820" y="286" fill="#94a3b8" font-size="14">reads only the order_total chunks,</text>
+  <text x="820" y="308" fill="#94a3b8" font-size="14">never touches the other columns' bytes</text>
+  <text x="820" y="352" fill="#4ade80" font-size="15" font-weight="700">Result on a 40-column table:</text>
+  <text x="820" y="376" fill="#cbd5e1" font-size="14">read 1 column, not 40</text>
+
+  <rect x="800" y="418" width="410" height="200" rx="14" fill="#1e293b" stroke="#0ea5e9" stroke-width="2"/>
+  <text x="820" y="452" fill="#38bdf8" font-size="19" font-weight="700">Row-group pruning</text>
+  <text x="820" y="482" fill="#cbd5e1" font-size="15">WHERE order_date = '2026-01-01'</text>
+  <text x="820" y="508" fill="#94a3b8" font-size="14">footer stats say row group 2's max date</text>
+  <text x="820" y="530" fill="#94a3b8" font-size="14">is '2025-12-30', so it cannot match:</text>
+  <text x="820" y="556" fill="#94a3b8" font-size="14">skip the whole row group unread</text>
+  <text x="820" y="596" fill="#38bdf8" font-size="15" font-weight="700">Less I/O without decoding data</text>
+</svg>
