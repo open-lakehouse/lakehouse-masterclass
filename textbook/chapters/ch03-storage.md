@@ -188,6 +188,12 @@ cat /tmp/back.txt   # -> hello lakehouse
 
 One networking point worth fixing in your head now, because it will save you an hour later. You reached the store at `localhost:8333` because you're on the host and the port is published. When Spark connects in the next chapter, it's another container on the Compose network, so it will reach the same store at `http://seaweedfs:8333`, by service name, not `localhost`. Same store, two addresses, depending on who's asking. This is exactly the container-to-container versus host-to-container distinction from Chapter 2.
 
+Step back and look at what you've actually stood up. It's one service, but it's a real one: an object store running in a container on a private Docker network, persisting to a named volume, answering the S3 API, and holding the bucket your tables will live in. Every layer above it in the reference architecture, compute, tables and catalog, ingestion, and the rest, is still empty. That's the point of building bottom-up: the ground floor is solid and you understand it completely before anything stands on it.
+
+![The architecture so far](../figures/ch03/fig-3.8-architecture-so-far.svg)
+
+**Figure 3.6**. What's running after this chapter: the SeaweedFS object store, reachable at `localhost:8333` from your host and `seaweedfs:8333` from inside the network. Every layer above it is still to come.
+
 ## Troubleshooting
 
 - **`docker compose ps` doesn't show seaweedfs running.** Check `docker compose logs seaweedfs`. A common cause is that the published port `8333` is already in use by something else; change the host side of the mapping (for example `"8433:8333"`) and reach it there.
@@ -227,4 +233,4 @@ One networking point worth fixing in your head now, because it will save you an 
 
 ![Progress: Storage complete, Compute next](../figures/ch03/fig-3.4-progress-storage-done.svg)
 
-**Figure 3.6**. Progress map with Storage done and Compute highlighted next.
+**Figure 3.7**. Progress map with Storage done and Compute highlighted next.
