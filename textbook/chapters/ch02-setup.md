@@ -30,11 +30,11 @@ Running one container by hand is a long command with a lot of flags. Running six
 
 That is the pattern for the rest of the course. Each chapter adds one service to this Compose file, brings it up, and confirms it's healthy, so by the end you have the whole stack described in one file you wrote and understand line by line. This chapter just gets Docker and Compose in place so the next one can stand up the first real service.
 
-![Installing services on your host causes version conflicts; running each in a container isolates its dependencies](../figures/ch02/fig-2.4-containers-vs-host.svg)
+![Installing services on your host causes version conflicts; running each in a container isolates its dependencies](../figures/ch02/fig-2.2-containers-vs-host.svg)
 
 **Figure 2.2**. The same four services installed directly on your host (shared dependencies, version conflicts, works only on your machine) versus each in its own container (isolated dependencies, no conflicts, reproducible anywhere).
 
-![Each service block in the Compose file becomes one running container](../figures/ch02/fig-2.5-compose-to-stack.svg)
+![Each service block in the Compose file becomes one running container](../figures/ch02/fig-2.3-compose-to-stack.svg)
 
 **Figure 2.3**. One block of text per service in `docker-compose.yml` becomes one running container. The file is your infrastructure: readable, versioned, and reproducible with one command.
 
@@ -63,7 +63,7 @@ So there are two ways to reach a service, and they use different addresses:
 
 Getting these two mixed up is the single most common "why can't it connect" mistake: a container trying to reach another at `localhost` (which, inside a container, means *itself*), or you trying to hit a service from your laptop that never published its port. When a connection fails later in the course, come back to this distinction first.
 
-![How containers reach each other by service name, and the host reaches them by published port](../figures/ch02/fig-2.3-networking.svg)
+![How containers reach each other by service name, and the host reaches them by published port](../figures/ch02/fig-2.4-networking.svg)
 
 **Figure 2.4**. Services on the Compose network address each other by service name; the host reaches a service only through a published port.
 
@@ -126,7 +126,7 @@ What each is for:
 
 None of this is load-bearing yet. The point is that you have a home for each kind of thing you'll create, so when a later chapter says "add the Spark service" or "initialize the pipeline project," you already know where it goes. We'll create the actual `docker-compose.yml` in the next chapter, when there's a first service to put in it.
 
-![The project layout and what each folder holds](../figures/ch02/fig-2.6-project-layout.svg)
+![The project layout and what each folder holds](../figures/ch02/fig-2.5-project-layout.svg)
 
 **Figure 2.5**. The project layout. Each folder is a home for one kind of thing you'll build; `.env` holds secrets and is excluded by a `.gitignore` you commit first.
 
@@ -153,11 +153,11 @@ That is deliberately the first thing you commit: the rule that keeps secrets out
 
 One habit worth adopting alongside this: commit an example file, `.env.example`, that lists the *names* of the variables with placeholder values, and do commit that one. It documents what configuration the project expects without exposing any real secret, so someone setting up the project later knows exactly what to fill in.
 
-The mechanism that makes this work is **environment-variable injection**: Compose reads `.env`, and each service's definition pulls the values it needs into the container's environment at startup, with a line like `environment: [ "MINIO_ROOT_PASSWORD=${MINIO_PASSWORD}" ]`. The secret lives in one gitignored file, gets injected into the container that needs it at runtime, and never appears in anything you commit. That indirection is the whole point, so two anti-patterns follow directly from it. Never hardcode a secret literally in `docker-compose.yml`, because that file is committed and the secret would go straight into your history. And never bake a secret into a container image (in a Dockerfile, say), because images get shared and pushed to registries, and anyone who pulls the image gets the secret with it. Config and code are shareable; secrets are injected at runtime and stay out of both.
+The mechanism that makes this work is **environment-variable injection**: Compose reads `.env`, and each service's definition pulls the values it needs into the container's environment at startup, with a line like `environment: [ "AWS_SECRET_ACCESS_KEY=${S3_SECRET_KEY}" ]` (exactly the pattern you'll use for the object store in the next chapter). The secret lives in one gitignored file, gets injected into the container that needs it at runtime, and never appears in anything you commit. That indirection is the whole point, so two anti-patterns follow directly from it. Never hardcode a secret literally in `docker-compose.yml`, because that file is committed and the secret would go straight into your history. And never bake a secret into a container image (in a Dockerfile, say), because images get shared and pushed to registries, and anyone who pulls the image gets the secret with it. Config and code are shareable; secrets are injected at runtime and stay out of both.
 
 This `.env` approach is right for local development, and it's worth being honest that it is not how you handle secrets in production. A gitignored file on a laptop doesn't rotate credentials, doesn't audit who read them, and doesn't scale across a team or a cluster. In production, secrets live in a dedicated secret manager, HashiCorp Vault, or a cloud provider's offering like AWS Secrets Manager, which handle rotation, access control, and auditing, and inject secrets into services the same way at runtime. The habit you're building now, keep secrets out of code and inject them at startup, is exactly the habit those tools formalize, so nothing you learn here is wasted when you graduate to them. We return to this in the deployment chapter.
 
-![A secret kept in a gitignored .env is injected into the container at runtime, never hardcoded or committed](../figures/ch02/fig-2.7-secret-flow.svg)
+![A secret kept in a gitignored .env is injected into the container at runtime, never hardcoded or committed](../figures/ch02/fig-2.6-secret-flow.svg)
 
 **Figure 2.6**. The pattern: a secret lives in a gitignored `.env`, Compose references it by name, and the container receives it as an environment variable at runtime. The three anti-patterns below all commit the secret in some form.
 
@@ -203,6 +203,6 @@ You're ready to move on when:
 - You confirmed Docker can pull and run a container, and laid out a project directory ready for its first real service.
 - **Next, Chapter 3, Storage:** create your first real service, an S3-compatible object store, in the `docker-compose.yml` you'll start for real, and set up the warehouse it holds.
 
-![Progress: Setup complete, Storage next](../figures/ch02/fig-2.2-progress-setup-done.svg)
+![Progress: Setup complete, Storage next](../figures/ch02/fig-2.7-progress-setup-done.svg)
 
 **Figure 2.7**. Progress map with **Setup ✓** and **Storage** highlighted next.

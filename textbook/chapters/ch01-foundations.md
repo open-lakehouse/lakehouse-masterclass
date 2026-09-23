@@ -40,17 +40,17 @@ That pattern is the reason the checklist above tips toward a lakehouse. Multiple
 
 Here's the reference architecture you're going to build. It's worth spending a minute on, because everything after this is just filling it in one layer at a time.
 
-![The open lakehouse architecture](../figures/ch01/fig-1.4-architecture-map.svg)
+![The open lakehouse architecture](../figures/ch01/fig-1.2-architecture-map.svg)
 
-**Figure 1.4**. Object storage at the base; compute and the table/catalog layer above it; ingestion, transformation, and streaming in the middle; orchestration across them; serving, AI, and agents on top. This is the system you'll have running by the last chapter.
+**Figure 1.2**. Object storage at the base; compute and the table/catalog layer above it; ingestion, transformation, and streaming in the middle; orchestration across them; serving, AI, and agents on top. This is the system you'll have running by the last chapter.
 
 Read it bottom-up, because that's both how it's built and how it depends on itself: each layer only works once the one beneath it does. Object storage holds the bytes. The table format turns those bytes into real tables, and the catalog keeps track of them. Compute reads and writes those tables. Ingestion, transformation, and streaming are the data flows that move order data through Bronze, Silver, and Gold. Orchestration runs those flows on a schedule. Serving, AI, and agents are the consumers on top, reading the Gold tables the layers below produced. You don't need to memorize this yet; the next section walks each layer in turn.
 
 It helps to see why this shape beats the two things it replaces. A warehouse is reliable but closed, and it welds storage to compute. A lake is open and cheap but gives you no guarantees, so a pile of files is never quite a trustworthy table. The lakehouse takes the cheap, open storage of the lake and adds the guarantees of the warehouse back on top, through the table format.
 
-![Warehouse vs. lake vs. lakehouse](../figures/ch01/fig-1.2-warehouse-lake-lakehouse.svg)
+![Warehouse vs. lake vs. lakehouse](../figures/ch01/fig-1.3-warehouse-lake-lakehouse.svg)
 
-**Figure 1.2**. A warehouse is reliable but closed and coupled; a lake is open and cheap but offers no guarantees; a lakehouse puts warehouse guarantees on cheap open storage via an open table format.
+**Figure 1.3**. A warehouse is reliable but closed and coupled; a lake is open and cheap but offers no guarantees; a lakehouse puts warehouse guarantees on cheap open storage via an open table format.
 
 ## What each layer is for, and the simpler thing it replaces
 
@@ -60,7 +60,7 @@ You just saw what each layer does. This section is the harder question: how do y
 
 **Open table format, instead of reading Parquet straight from a bucket.** This is the question every engineer asks first: why not just point Spark at a folder of Parquet files in S3 and call it a table? It's worth answering properly, because Parquet is a genuinely good file format (columnar, compressed, carries per-file column stats) and a genuinely bad table. The gap is everything that makes a directory of files behave like a table:
 
-- Nothing records which files are the table. "The table" is whatever is under the prefix when you list it, so every read starts with a `LIST`, which is slow across millions of objects and historically wasn't consistent on S3 either.
+- Nothing records which files are the table. "The table" is whatever is under the prefix when you list it, so every read starts with a `LIST`, which is slow across millions of objects. (S3 listings were also eventually consistent for years, which caused real correctness bugs; S3 has been strongly read-after-write consistent since late 2020, so the table format's value here is now about knowing the file set directly rather than listing at all, not about working around S3 consistency.)
 - Writes aren't atomic. If a job writes 200 files and dies after 120, a reader sees a half-written table as if it were real, because the filesystem contents are the only source of truth.
 - Concurrent writers clobber each other. Two jobs writing the same prefix have no commit protocol to coordinate, so you silently lose or duplicate data with no error raised.
 - Nothing enforces schema. Each Parquet file carries its own schema and nothing checks that Tuesday's files agree with Wednesday's. A column whose type drifts across files gives you a merge error at best and silent coercion at worst, and there is no safe way to rename or add a column across the set.
@@ -154,7 +154,7 @@ At its most basic, the catalog answers "what tables exist, and where are their f
 
 The question that matters is not whether you run a catalog, you need one, but which kind, because it decides how many engines can share your tables. This is where the Iceberg REST Catalog (IRC) comes in. IRC is a standard HTTP interface for catalogs: any engine that speaks it, Spark, Trino, DuckDB, Flink, can find and read your tables through the same endpoint, with no per-engine wiring. It's the piece that turns "our tables" into "our tables, readable by anything under one set of rules," which is the whole point of committing to an open format.
 
-The older alternative is the Hive metastore: ubiquitous, but a heavier, Thrift-based service from the Hadoop era, without the open multi-engine story IRC gives you or a real governance model on top. It still works, and plenty of production runs on it, but starting a new lakehouse on it in 2026 buys you operational weight and an older interface for no upside.
+The older alternative is the Hive metastore: ubiquitous, but a heavier, Thrift-based service from the Hadoop era, without the open multi-engine story IRC gives you or a real governance model on top. It still works, and plenty of production runs on it, but starting a new lakehouse on it today buys you operational weight and an older interface for no upside.
 
 This course uses Unity Catalog OSS, which exposes an Iceberg REST endpoint and adds the governance path, access control, credential vending, lineage, tags, as you grow, without locking you to a vendor. It's not the only IRC-compatible option (Apache Polaris, Project Nessie, and others fill the same role), and because they share the REST interface, the catalog layer is genuinely swappable. You'll stand it up in Chapter 5 and lean on it again for serving and agents.
 
@@ -204,9 +204,9 @@ The reason this isn't a decision you have to get perfectly right up front is tha
 
 To keep this concrete instead of abstract, the whole build uses one realistic dataset: a stream of e-commerce order events. You'll land them raw, clean and conform them, aggregate them into business tables, schedule the pipeline, serve them to multiple engines, train a model on them, and finally let an agent operate the whole thing. One honest dataset (messy, continuous, aggregatable, with signal to learn from) exercises every layer the way real work does.
 
-![One order event's journey through the stack](../figures/ch01/fig-1.5-order-event-journey.svg)
+![One order event's journey through the stack](../figures/ch01/fig-1.4-order-event-journey.svg)
 
-**Figure 1.5**. The order event's path across the layers: this is the data you'll follow from raw landing to business metric to model.
+**Figure 1.4**. The order event's path across the layers: this is the data you'll follow from raw landing to business metric to model.
 
 ## Your week-one sequence
 
@@ -238,13 +238,13 @@ Every chapter from here ends with the bare minimum to call this layer production
 
 If every box is checked, you have a defensible architecture you could put in a design doc and hand to your team. That's the deliverable of this chapter.
 
-## Recap & what's next
+## Recap and what's next
 
 - The hard-to-reverse decisions are table format and catalog. Make those deliberately; the rest are cheaper to change.
 - Default to Iceberg plus Unity Catalog OSS (REST) plus S3-API storage plus Spark Connect, batch-first, self-host-to-learn and managed-where-you-must, and deviate only with a reason.
 - Build bottom-up, one verifiable layer at a time, following one real dataset.
 - **Next, Chapter 2, Setup:** install the prerequisites and bring up the one control CLI you'll drive the whole stack with.
 
-![Progress: Foundations complete, Setup next](../figures/ch01/fig-1.6-progress-foundations-done.svg)
+![Progress: Foundations complete, Setup next](../figures/ch01/fig-1.5-progress-foundations-done.svg)
 
-**Figure 1.6**. Architecture decisions locked. Next: Setup.
+**Figure 1.5**. Architecture decisions locked. Next: Setup.

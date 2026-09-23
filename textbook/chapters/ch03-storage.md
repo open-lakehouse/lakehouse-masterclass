@@ -4,7 +4,7 @@ This is the first chapter where you build a real piece of the lakehouse. By the 
 
 Storage is the ground floor. Every table, pipeline, model, and query in the chapters ahead ultimately reads from and writes to what you set up here. And the single most useful idea in this chapter is that "storage" in a lakehouse is really two separate decisions stacked together: where the raw bytes physically live, and what turns those bytes into a real table. People blur these constantly, and keeping them apart is what makes the rest of the lakehouse make sense. This chapter builds the bottom half, the object store, and settles the decision about the top half, the table format. Chapter 5 builds that top half for real.
 
-![Progress: Storage](../figures/ch03/fig-3.3-progress-storage.svg)
+![Progress: Storage](../figures/ch03/fig-3.1-progress-storage.svg)
 
 **Figure 3.1**. Progress map with **Storage** highlighted.
 
@@ -31,7 +31,7 @@ People blur three different things together when they say "storage": SeaweedFS, 
 
 So the stack reads bottom to top: the object store holds opaque bytes, Parquet structures the bytes inside each file, and Iceberg metadata (also just files in the bucket) ties many Parquet files into one transactional table. Two of these are decisions you make, the object store and the table format; Parquet is the near-universal default underneath both.
 
-![The storage stack: three layers, two decisions](../figures/ch03/fig-3.5-storage-stack.svg)
+![The storage stack: three layers, two decisions](../figures/ch03/fig-3.2-storage-stack.svg)
 
 **Figure 3.2**. SeaweedFS holds objects, Parquet structures each file, and Iceberg metadata ties many files into one table. Data and metadata all live as ordinary objects in the same bucket.
 
@@ -45,7 +45,7 @@ Why insist on the split? Because it shows up the moment you operate this. You de
 
 We build the bottom layer now and settle the top-layer decision; Chapter 5 builds the top layer for real.
 
-## Part 1. Where the bytes live: the object store
+## Where the bytes live: the object store
 
 Why object storage, and not a filesystem or a database? Three reasons: it's cheap per gigabyte, it scales effectively without limit, and, critically for a lakehouse, it's decoupled from compute, so you can point many engines at the same files without any of them owning the storage. The universal interface is the S3 API, originally Amazon's, now the lingua franca that every object store speaks. Because your code targets the S3 API rather than a specific product, moving between object stores is a configuration change, not a rewrite.
 
@@ -69,7 +69,7 @@ Where you run largely dictates the object store, so this is less a free choice t
 
 The honest reason we land on SeaweedFS over MinIO here is not "it's lighter." It's two concrete things. First, licensing: SeaweedFS is under a permissive license, while MinIO's server is AGPL, which some organizations can't take on. Second, and more specific to this stack, SeaweedFS handles S3 presigned-URL host rewriting in a way the catalog's credential vending depends on later: when Unity Catalog OSS vends short-lived, scoped credentials to a reader, the presigned URLs have to resolve correctly from both inside and outside the container network, and SeaweedFS supports that cleanly. That's a real "why we chose this" you can defend, not a preference. Because all three speak the S3 API, the lakehouse you build on SeaweedFS locally runs on Amazon S3 in production by changing an endpoint and some credentials; nothing about your tables or pipelines changes.
 
-![Object stores over one S3 API](../figures/ch03/fig-3.1-object-stores.svg)
+![Object stores over one S3 API](../figures/ch03/fig-3.3-object-stores.svg)
 
 **Figure 3.3**. S3, MinIO, and SeaweedFS all speak the same S3 API, so the store is swappable by configuration.
 
@@ -77,9 +77,9 @@ The honest reason we land on SeaweedFS over MinIO here is not "it's lighter." It
 
 Note the `s3a://` prefix: that's the scheme Spark and Hadoop use to talk to S3-compatible storage. You'll see `s3://` (AWS tools), `s3a://` (Spark/Hadoop), and plain paths in different contexts; they all point at the same objects, just through different clients. Don't let the prefixes confuse you, they're dialects of the same address.
 
-## Part 2. Inside the two formats: Parquet and Iceberg
+## Inside the two formats: Parquet and Iceberg
 
-The top of this chapter named the three layers. Now we open the two that are worth understanding in detail: what a Parquet file looks like inside, and what an Iceberg table actually is on disk. You will not create a table here (that needs a compute engine and a catalog, which arrive in Chapters 4 and 5), but knowing the shape now means nothing in those chapters is a black box.
+The storage-stack section named the three layers. Now we open the two that are worth understanding in detail: what a Parquet file looks like inside, and what an Iceberg table actually is on disk. You will not create a table here (that needs a compute engine and a catalog, which arrive in Chapters 4 and 5), but knowing the shape now means nothing in those chapters is a black box.
 
 ### What a Parquet file looks like inside
 
@@ -90,7 +90,7 @@ That layout buys two concrete speedups, and both matter for every query you will
 - **Column projection.** A query that selects 3 of 40 columns reads only those 3 columns' chunks and never touches the other 37 columns' bytes. Row-oriented formats can't do this; they have to read whole rows.
 - **Row-group pruning.** Before decoding anything, a reader checks the footer stats. If you filter `WHERE order_date = '2026-01-01'` and a row group's recorded max date is `2025-12-30`, that row group cannot match, so the reader skips it unread. Less I/O, no wasted decoding.
 
-![Inside a Parquet file](../figures/ch03/fig-3.6-parquet-anatomy.svg)
+![Inside a Parquet file](../figures/ch03/fig-3.4-parquet-anatomy.svg)
 
 **Figure 3.4**. A Parquet file is row groups of column chunks plus a footer of statistics. Column projection reads only the needed columns; row-group pruning skips slices that can't match a filter.
 
@@ -100,7 +100,7 @@ Parquet also compresses well, because a column holds one type of value and simil
 
 An Iceberg table is not a Parquet file and not a folder. It's a tree of metadata files, living in the same bucket next to the data, that a catalog points at. From the top down: the catalog holds a pointer to the current `metadata.json`; that file records the schema, the partition spec, and the list of snapshots, and it names the current snapshot; each snapshot points at a manifest list; the manifest list names the manifests; and each manifest enumerates the actual Parquet data files along with each file's column statistics.
 
-![What an Iceberg table is on disk](../figures/ch03/fig-3.7-iceberg-metadata-tree.svg)
+![What an Iceberg table is on disk](../figures/ch03/fig-3.5-iceberg-metadata-tree.svg)
 
 **Figure 3.5**. Catalog pointer to metadata.json to manifest list to manifests to Parquet data files. Every layer above the data files is itself just an object in the bucket.
 
@@ -123,7 +123,7 @@ This chapter settles the two decisions, the object store (SeaweedFS) and the tab
 
 ## Build: SeaweedFS as your first service
 
-This is the first real service in your stack, so it's the first thing in the `docker-compose.yml` you deleted the smoke test from at the end of Chapter 2. You'll define SeaweedFS, bring it up, and prove you can put bytes in and get them back out over the S3 API.
+This is the first real service in your stack, so it's the first thing in the `docker-compose.yml` you're about to create at your project root (Chapter 2's `hello-world` smoke test used a throwaway file you removed; this is the real one). You'll define SeaweedFS, bring it up, and prove you can put bytes in and get them back out over the S3 API.
 
 Step 1. Put the credentials in your `.env`. SeaweedFS needs an access key and secret to protect its S3 endpoint, and everything downstream (Spark, the catalog) will read the same values. These are secrets, so they live in the gitignored `.env` from Chapter 2, not in the Compose file:
 
@@ -190,7 +190,7 @@ One networking point worth fixing in your head now, because it will save you an 
 
 Step back and look at what you've actually stood up. It's one service, but it's a real one: an object store running in a container on a private Docker network, persisting to a named volume, answering the S3 API, and holding the bucket your tables will live in. Every layer above it in the reference architecture, compute, tables and catalog, ingestion, and the rest, is still empty. That's the point of building bottom-up: the ground floor is solid and you understand it completely before anything stands on it.
 
-![The architecture so far](../figures/ch03/fig-3.8-architecture-so-far.svg)
+![The architecture so far](../figures/ch03/fig-3.6-architecture-so-far.svg)
 
 **Figure 3.6**. What's running after this chapter: the SeaweedFS object store, reachable at `localhost:8333` from your host and `seaweedfs:8333` from inside the network. Every layer above it is still to come.
 
@@ -231,6 +231,6 @@ Step back and look at what you've actually stood up. It's one service, but it's 
 - Your warehouse location is `s3a://lakehouse/warehouse`, and you reach the store at `localhost:8333` from the host while containers reach it at `seaweedfs:8333`.
 - Next, Chapter 4, Compute: bring up Spark and connect to it with a Spark Connect thin client (`sc://`) to run a first job against this storage.
 
-![Progress: Storage complete, Compute next](../figures/ch03/fig-3.4-progress-storage-done.svg)
+![Progress: Storage complete, Compute next](../figures/ch03/fig-3.7-progress-storage-done.svg)
 
 **Figure 3.7**. Progress map with Storage done and Compute highlighted next.
