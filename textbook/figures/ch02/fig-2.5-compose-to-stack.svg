@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="56" fill="#f8fafc" font-size="38" font-weight="700" text-anchor="middle">The Compose file is your infrastructure</text>
+  <text x="640" y="94" fill="#94a3b8" font-size="20" text-anchor="middle">One block of text per service becomes one running container</text>
+
+  <defs>
+    <marker id="a2s" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#22c55e"/>
+    </marker>
+  </defs>
+
+  <!-- LEFT: the file -->
+  <text x="130" y="150" fill="#e2e8f0" font-size="20" font-weight="700">docker-compose.yml</text>
+  <rect x="90" y="170" width="440" height="460" rx="14" fill="#0b1120" stroke="#334155" stroke-width="2"/>
+
+  <!-- minio block -->
+  <rect x="115" y="192" width="390" height="86" rx="8" fill="#111c2e" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="135" y="220" fill="#38bdf8" font-size="16" font-family="monospace">minio:</text>
+  <text x="155" y="244" fill="#94a3b8" font-size="14" font-family="monospace">image: minio/minio</text>
+  <text x="155" y="266" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["9000:9000"]</text>
+
+  <!-- spark block -->
+  <rect x="115" y="290" width="390" height="86" rx="8" fill="#111c2e" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="135" y="318" fill="#60a5fa" font-size="16" font-family="monospace">spark:</text>
+  <text x="155" y="342" fill="#94a3b8" font-size="14" font-family="monospace">image: spark:4.1</text>
+  <text x="155" y="364" fill="#94a3b8" font-size="14" font-family="monospace">depends_on: [minio]</text>
+
+  <!-- catalog block -->
+  <rect x="115" y="388" width="390" height="86" rx="8" fill="#111c2e" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="135" y="416" fill="#4ade80" font-size="16" font-family="monospace">catalog:</text>
+  <text x="155" y="440" fill="#94a3b8" font-size="14" font-family="monospace">image: unity-catalog</text>
+  <text x="155" y="462" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["8081:8081"]</text>
+
+  <!-- kafka block -->
+  <rect x="115" y="486" width="390" height="86" rx="8" fill="#111c2e" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="135" y="514" fill="#fbbf24" font-size="16" font-family="monospace">kafka:</text>
+  <text x="155" y="538" fill="#94a3b8" font-size="14" font-family="monospace">image: apache/kafka</text>
+  <text x="155" y="560" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["9092:9092"]</text>
+
+  <!-- command in middle -->
+  <rect x="560" y="360" width="160" height="52" rx="10" fill="#0f172a" stroke="#22c55e" stroke-width="2"/>
+  <text x="640" y="392" fill="#4ade80" font-size="16" font-family="monospace" font-weight="700" text-anchor="middle">compose up</text>
+
+  <!-- arrows from command to right -->
+  <line x1="720" y1="386" x2="770" y2="386" stroke="#22c55e" stroke-width="3" marker-end="url(#a2s)"/>
+
+  <!-- RIGHT: running containers -->
+  <text x="1010" y="150" fill="#e2e8f0" font-size="20" font-weight="700" text-anchor="middle">Running containers</text>
+  <rect x="790" y="170" width="440" height="460" rx="14" fill="#0b1120" stroke="#334155" stroke-width="2" stroke-dasharray="8 6"/>
+  <text x="1010" y="196" fill="#64748b" font-size="14" text-anchor="middle">Compose network (private)</text>
+
+  <rect x="830" y="214" width="160" height="76" rx="10" fill="#1e293b" stroke="#0ea5e9" stroke-width="2"/>
+  <text x="910" y="248" fill="#f1f5f9" font-size="17" font-weight="700" text-anchor="middle">minio</text>
+  <text x="910" y="272" fill="#38bdf8" font-size="13" text-anchor="middle">running</text>
+
+  <rect x="1030" y="214" width="160" height="76" rx="10" fill="#1e293b" stroke="#3b82f6" stroke-width="2"/>
+  <text x="1110" y="248" fill="#f1f5f9" font-size="17" font-weight="700" text-anchor="middle">spark</text>
+  <text x="1110" y="272" fill="#60a5fa" font-size="13" text-anchor="middle">running</text>
+
+  <rect x="830" y="322" width="160" height="76" rx="10" fill="#1e293b" stroke="#22c55e" stroke-width="2"/>
+  <text x="910" y="356" fill="#f1f5f9" font-size="17" font-weight="700" text-anchor="middle">catalog</text>
+  <text x="910" y="380" fill="#4ade80" font-size="13" text-anchor="middle">running</text>
+
+  <rect x="1030" y="322" width="160" height="76" rx="10" fill="#1e293b" stroke="#f59e0b" stroke-width="2"/>
+  <text x="1110" y="356" fill="#f1f5f9" font-size="17" font-weight="700" text-anchor="middle">kafka</text>
+  <text x="1110" y="380" fill="#fbbf24" font-size="13" text-anchor="middle">running</text>
+
+  <!-- takeaway -->
+  <rect x="830" y="440" width="360" height="150" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+  <text x="1010" y="474" fill="#e2e8f0" font-size="16" font-weight="700" text-anchor="middle">One file, versioned in git</text>
+  <text x="1010" y="504" fill="#cbd5e1" font-size="14" text-anchor="middle">Readable: anyone can see the whole stack</text>
+  <text x="1010" y="530" fill="#cbd5e1" font-size="14" text-anchor="middle">Reproducible: same result every time</text>
+  <text x="1010" y="556" fill="#cbd5e1" font-size="14" text-anchor="middle">One command up, one command down</text>
+</svg>
