@@ -102,31 +102,13 @@ You rarely build all of this at once, and you shouldn't. The layers tend to arri
 
 If you're early on this path, most of the upper layers are things to design for but not build yet. If you're already fighting several of these pains at once, that's the signal you need the full stack sooner rather than later. Either way, you build bottom-up: the lower layers are what everything above them stands on.
 
-## Object storage and the files underneath
+## Object storage
 
-Object storage is the foundation the whole stack sits on, and there's little to decide here: your store is dictated by where you run. What matters is that you build against the **S3 API**, not a specific product, so the store is swappable. Your tables and pipelines target an S3 endpoint; moving from local to cloud changes an endpoint and credentials, not your code.
-
-On a cloud provider you use the native store, Amazon S3, Google Cloud Storage, or Azure Data Lake Storage. They're durable, effectively infinite, zero-ops, and already integrated with everything else you run there. There's no reason to run your own object store on top of a cloud that already provides one.
-
-Self-hosting, on-prem or in local development, you run an S3-compatible store instead. Two open-source options matter:
-
-- **MinIO.** The common choice for real self-hosted and on-prem deployments. Fully S3-compatible and mature, with the operational features (erasure coding, replication) you want if this is actually holding your data.
-- **SeaweedFS.** Lighter, with a small footprint. A good fit when you want a real S3 endpoint without much overhead, which is why this course uses it for local development.
-
-Both speak the S3 API, so which one you run locally changes nothing above it.
-
-Underneath the table format, the bytes themselves are **Parquet** files: a columnar, compressed, open file format. Columnar means a query that touches 3 of 40 columns reads only those 3. Compression works well because a column holds one type of value. Each file also carries footer statistics (per-column min/max and counts) that let an engine skip files that can't match a filter. The table format organizes these Parquet files into a table with history and transactions; Parquet is what's actually on disk. You don't pick it, Iceberg and Delta both write it, but knowing it's a columnar file with stats in the footer explains a lot of why lakehouse queries are fast. Chapter 3 goes deeper on both object storage and Parquet's internals.
+Object storage is the foundation the whole stack sits on, and there's little to decide here: your store is dictated by where you run. On a cloud provider you use the native store (S3, GCS, or Azure Data Lake Storage); self-hosting, you run an S3-compatible store (MinIO or SeaweedFS, which is what this course runs locally). What matters at this level is that you build against the **S3 API**, not a specific product, so the store is swappable: moving from local to cloud changes an endpoint and credentials, not your code. The bytes those stores hold are **Parquet** files, a columnar, compressed, open format that you don't choose (Iceberg and Delta both write it) but that explains much of why lakehouse queries are fast. Chapter 3 makes the object-store call in detail and opens up Parquet and the table format on disk.
 
 ## Table format
 
-The table format dictates how every byte is physically laid out and which engines can read it, so it's worth reasoning about rather than defaulting to one. There are three serious open formats: Iceberg, Delta, and Hudi. They all do the core job from the last section, the metadata layer that makes files behave like a table, so you don't choose on "does it have ACID." They all do. You choose on the axes where they actually differ:
-
-- **Engine neutrality.** How many engines read this format without a conversion step? This is your lock-in risk and how painful multi-engine serving will be later. Weight it heavily if you expect more than one consumer, which is most orgs.
-- **Governance of the spec.** Is the format controlled by one vendor's roadmap, or a multi-party open standard? This is a bet on the next few years, not this quarter.
-- **Workload fit.** Is your dominant pattern append-heavy analytics, or high-frequency upserts and change-data-capture? The formats optimize for different answers, and this is also where streaming write latency and small-file handling differ.
-- **Ecosystem gravity.** What is your org already committed to? A choice that fights your existing platform costs more than its technical merits are worth.
-
-Weigh the options against those axes:
+The table format dictates how every byte is physically laid out and which engines can read it, so it's the decision you least want to redo, and worth reasoning about rather than defaulting. There are three serious open formats: Iceberg, Delta, and Hudi. They all do the core job from the last section, the metadata layer that makes files behave like a table, so you don't choose on "does it have ACID." You choose on the axes where they differ:
 
 | | Engine neutrality | Spec governance | Best-fit workload |
 |---|---|---|---|
@@ -134,31 +116,11 @@ Weigh the options against those axes:
 | **Delta** | Good, historically Spark-first; opening up via Delta Kernel | Open, but Databricks is the primary driver | Databricks-native workloads |
 | **Hudi** | Good, Spark-centric | Open (Apache) | High-frequency upserts / CDC |
 
-In practice the real choice is Iceberg or Delta; Hudi is the right answer only when heavy upserts and CDC are your primary workload. If you weight engine neutrality and open governance highest, which is the right call when you can't fully predict your future consumers, you land on Iceberg, and that's what this course uses. If your center of gravity is Databricks, Delta is the low-friction choice. Either way the reasoning should be visible enough that you can redo it if your weights differ.
-
-Three practical notes once you've chosen:
-
-**Use one format.** Running Iceberg and Delta side by side doubles your catalog config, engine-compatibility testing, and operational surface for no real gain. Pick one and make it the default everywhere.
-
-**Migration is cheaper on data than on history.** Both formats store the same Parquet files underneath, so switching mostly regenerates the metadata layer over data that stays in place; you rarely rewrite the bytes. What doesn't carry over cleanly is history: converting Iceberg to Delta brings the current table state, not the snapshot lineage, so time travel and audit history are effectively lost. That, plus repointing everything that reads the tables, is why this is the decision you least want to redo.
-
-**The formats are converging, so check current versions.** Delta can expose Iceberg-readable metadata, translation tools exist in both directions, and each release narrows the gap on the workload and latency differences above. Compare the current versions rather than older write-ups. None of it changes the recommendation: for an open, multi-engine lakehouse, use Iceberg.
-
-> **Prove it before you commit:** write a small table in your chosen format and read it from every consumer you'll have, Spark, your BI tool, DuckDB, whatever. If any of them can't read it today, you've found the problem while it's still cheap to fix.
+In practice the real choice is Iceberg or Delta; Hudi is the right answer only when heavy upserts and CDC are your primary workload. Weight engine neutrality and open governance highest, which is the right call when you can't fully predict your future consumers, and you land on **Iceberg**, which is what this course uses. If your center of gravity is Databricks, Delta is the low-friction choice, and the reasoning is visible enough that you can redo it for your own weights. Chapter 3 goes deeper on the weighing and the practical rules (use one format, what a migration does and doesn't carry, how the two are converging).
 
 ## Catalog
 
-Your organization needs a single, authoritative answer to "what tables exist, which is the current version, and who is allowed to read or write each one." That's a governance problem, and it's the one an open table format alone doesn't solve. Iceberg and Delta give you rich per-table history, but the format sitting in a bucket doesn't decide who can access a table, doesn't vend credentials to readers and writers, and doesn't carry the organizational metadata (tags, ownership, roles) you need to run this as a shared source of truth. Something has to own that, and that something is the catalog.
-
-At its most basic, the catalog answers "what tables exist, and where are their files?" Every engine consults it before it reads: it maps a table name to its current metadata location, and the metadata points at the data files. That's also how it always resolves the latest version of a table, which a bare pile of files can't reliably do on its own. On top of that lookup, a real catalog is where access control, credential vending, tags, and ownership live, so the same governance applies no matter which engine is asking.
-
-The question that matters is not whether you run a catalog, you need one, but which kind, because it decides how many engines can share your tables. This is where the Iceberg REST Catalog (IRC) comes in. IRC is a standard HTTP interface for catalogs: any engine that speaks it, Spark, Trino, DuckDB, Flink, can find and read your tables through the same endpoint, with no per-engine wiring. It's the piece that turns "our tables" into "our tables, readable by anything under one set of rules," which is the whole point of committing to an open format.
-
-The older alternative is the Hive metastore: ubiquitous, but a heavier, Thrift-based service from the Hadoop era, without the open multi-engine story IRC gives you or a real governance model on top. It still works, and plenty of production runs on it, but starting a new lakehouse on it today buys you operational weight and an older interface for no upside.
-
-This course uses Unity Catalog OSS, which exposes an Iceberg REST endpoint and adds the governance path, access control, credential vending, lineage, tags, as you grow, without locking you to a vendor. It's not the only IRC-compatible option (Apache Polaris, Project Nessie, and others fill the same role), and because they share the REST interface, the catalog layer is genuinely swappable. You'll stand it up in Chapter 5 and lean on it again for serving and agents.
-
-> **Treat the catalog as a production database.** It's a critical, stateful service backed by its own metadata store (Postgres). Decide early where that lives and how it's backed up: lose the catalog and you have files nothing recognizes as tables.
+Once your tables live in an open format, something has to answer "what tables exist, which is the current version, and who may read or write each one." That is the catalog, and it's the layer the table format alone doesn't provide: the format gives you per-table history, but not access control, credential vending, or the org-wide view that makes this a shared source of truth. You don't decide *whether* to run one, you need it; you decide *which kind*, because that determines how many engines can share your tables. The answer is a catalog that speaks the **Iceberg REST Catalog (IRC)** interface, so any engine (Spark, Trino, DuckDB, Flink) reads your tables through one endpoint, rather than the older, heavier, single-purpose Hive metastore. This course uses **Unity Catalog OSS**, which exposes an IRC endpoint and grows into real governance, and which you stand up in Chapter 5.
 
 ## Compute
 
@@ -174,23 +136,15 @@ The part worth understanding up front is not "Spark or not," it's how your code 
 
 ## Batch and streaming
 
-The difference people usually have in mind is about where the data comes from and what processes it. Batch means data at rest, files or tables you read on a schedule, transform, and write back, classically a Spark job over data in object storage. Streaming means data in motion, an unbounded feed of events you react to as they arrive, classically a Kafka topic processed by a dedicated stream engine like Flink. Two sources, two engines, two operational models. For years that meant maintaining two separate stacks that were supposed to agree and often didn't.
+Batch means data at rest: files or tables you read on a schedule, transform, and write back. Streaming means data in motion: an unbounded feed of events you react to as they arrive. These used to be two separate stacks (a Spark job over object storage on one side, a Kafka topic processed by a dedicated engine like Flink on the other) that were supposed to agree and often didn't. The shift worth knowing is that they've converged: events can stream off Kafka into your Bronze layer while Silver and Gold are transformed and served exactly as they would be for batch data, and Spark Structured Streaming now does the job that once required a separate Flink deployment. So one engine, one catalog, and one set of governance rules cover both paths, and a consumer reading a Gold table neither knows nor cares whether the rows arrived nightly or live. That's why this course builds streaming in natively rather than as a bolt-on.
 
-What's changed is convergence. Streaming and batch increasingly feed the same lakehouse rather than living in parallel systems. A common shape: events stream off Kafka straight into your Bronze layer as they arrive, and you still transform and serve from Silver and Gold the same way you would for batch data. The consumer reading a Gold table doesn't know or care whether the rows underneath arrived in a nightly batch or a live stream. And the engine has converged too. Spark Structured Streaming now handles the streaming job that used to require a separate Flink deployment, so the same engine, the same catalog, and the same governance cover both paths. That matters because the reason to keep streaming inside your lakehouse instead of off to the side is exactly governance and one source of truth, the same access control, lineage, and table definitions applying whether data is streamed or batched.
-
-That's why this course builds streaming in natively rather than treating it as a separate topic. You'll land streaming data through Kafka into the same tables your batch pipelines write, on one Spark-based stack, so you can see what it looks like to have both without running two systems.
-
-Streaming earns its place when freshness is a real requirement, not a preference. Fraud detection, live operational dashboards, and alerting need data in seconds or minutes, and there the added cost is justified. And it is added cost: streaming means managing unbounded state, late and out-of-order events, checkpoints, and exactly-once delivery, all of which are more to operate than a scheduled batch job. The trap is treating "real-time" as a default when nobody has quantified the latency they actually need. As a rule of thumb you start with batch, which covers most needs and is simpler to operate, and add streaming for the pipelines where freshness genuinely matters, both living in the same lakehouse.
+The judgment call is when to use it. Streaming earns its place when freshness is a real requirement (fraud detection, live dashboards, alerting), and it costs you: unbounded state, late and out-of-order events, checkpoints, exactly-once delivery, all more to operate than a scheduled job. The trap is treating "real-time" as a default when nobody has quantified the latency they need. Start with batch, which covers most needs, and add streaming for the specific pipelines that genuinely need it, both on the same stack.
 
 ## Serving
 
-Everything up to here has been about producing trustworthy tables. Serving is the other side: getting those tables to the people and tools that consume them, BI dashboards, analysts writing SQL, notebooks, other engines, models. It's the layer where the lakehouse actually pays off, because data nobody can reach isn't worth the pipeline that built it.
+Serving is getting your finished tables to the people and tools that consume them: BI dashboards, analysts, notebooks, other engines, models. The instinct most teams start with is to export a copy to wherever each consumer lives, but every export drifts from the source the moment it's made, and you end up maintaining a web of extracts that disagree with each other and with production. In an open lakehouse you mostly avoid that, because the tables already live in an open format registered in the catalog, so any engine that speaks the catalog's interface reads them in place, no copy.
 
-The instinct most teams start with is to export: copy the finished data out to wherever the consumer lives, a warehouse for the BI tool, a CSV for the analyst, a separate store for the app. Every export is a second copy that starts drifting from the source the moment it's made, and soon you're maintaining a web of extracts that disagree with each other and with production. That's the problem serving through the lakehouse solves.
-
-In an open lakehouse, serving is mostly something you already built. Because the tables live in an open format and are registered in the catalog, any engine that speaks the catalog's interface can read them in place, no export, no copy. It helps to separate two categories here. First, the engines that actually read the tables: a lightweight single-node engine like DuckDB is often the right tool for an analyst querying a Gold table on their laptop, while a distributed SQL engine like Trino fits when many people need to query shared tables at once. This is where those lighter engines earn their place, DuckDB does the read even though Spark did the heavy lifting upstream. Second, the BI and dashboard tools that sit on top of an engine rather than reading Iceberg themselves: something like Apache Superset or Metabase connects through one of those engines to visualize results. This course uses DuckDB as the concrete example, since it reads Iceberg directly with no server to stand up, which suits a laptop-scale build. The point in every case is the same: one copy of the data, many readers, the same governance applying to all of them.
-
-The judgment in this layer is mostly about shaping Gold for its consumers and controlling access, not about moving data around. You model Gold tables for the questions people actually ask, and you use the catalog's access control to decide who can read what. Serving isn't a separate system you stand up so much as the natural consequence of having committed to open tables and a shared catalog in the first place.
+Two categories are worth separating. The engines that actually read the tables: a single-node engine like DuckDB is often right for an analyst querying a Gold table on a laptop, while a distributed SQL engine like Trino fits many concurrent users. And the BI tools that sit on top of an engine rather than reading Iceberg themselves: something like Superset or Metabase connects through one of those engines. This course uses DuckDB as the concrete example, since it reads Iceberg directly with no server to stand up. The judgment in this layer is about shaping Gold for its consumers and controlling access through the catalog, not about moving data around: one copy, many readers, the same governance for all of them.
 
 ## Self-hosted or managed
 
@@ -212,8 +166,8 @@ To keep this concrete instead of abstract, the whole build uses one realistic da
 
 Decisions made, here's the order I'd actually execute in. Each step is a chapter, and each ends with something you can verify:
 
-1. **Setup:** prerequisites and the one CLI you'll drive everything with.
-2. **Storage:** object store up, warehouse bucket, format locked.
+1. **Setup:** prerequisites, project layout, and Docker Compose in place.
+2. **Storage:** object store up as your first service, warehouse bucket, format locked.
 3. **Compute:** Spark plus Spark Connect, first remote job.
 4. **Tables and Catalog:** real Iceberg tables through Unity Catalog OSS.
 5. **Ingestion and Transformation:** batch medallion, Bronze to Silver to Gold.
