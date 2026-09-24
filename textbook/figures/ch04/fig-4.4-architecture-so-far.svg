@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1280" height="720" fill="#0f172a"/>
+  <text x="640" y="52" fill="#f8fafc" font-size="38" font-weight="700" text-anchor="middle">The architecture so far: storage plus compute</text>
+  <text x="640" y="90" fill="#94a3b8" font-size="20" text-anchor="middle">The object store runs, and a Spark cluster you drive over sc:// now sits beside it.</text>
+
+  <defs>
+    <marker id="arrowamber4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#fbbf24"/>
+    </marker>
+    <marker id="arrowblue4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#3b82f6"/>
+    </marker>
+  </defs>
+
+  <!-- LEFT: the live deployment -->
+  <text x="360" y="132" fill="#e2e8f0" font-size="20" font-weight="700" text-anchor="middle">Running now</text>
+
+  <!-- Host box -->
+  <rect x="70" y="150" width="580" height="470" rx="18" fill="#0b1120" stroke="#334155" stroke-width="2"/>
+  <text x="96" y="182" fill="#cbd5e1" font-size="18" font-weight="700">Your laptop (host)</text>
+
+  <!-- host client chips -->
+  <rect x="96" y="206" width="250" height="54" rx="10" fill="#1e293b" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="221" y="230" fill="#f8fafc" font-size="15" font-weight="700" text-anchor="middle">PySpark thin client</text>
+  <text x="221" y="250" fill="#93c5fd" font-size="14" font-family="monospace" text-anchor="middle">sc://localhost:15002</text>
+
+  <rect x="360" y="206" width="250" height="54" rx="10" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="485" y="230" fill="#f8fafc" font-size="15" font-weight="700" text-anchor="middle">AWS CLI / browser</text>
+  <text x="485" y="250" fill="#fbbf24" font-size="14" font-family="monospace" text-anchor="middle">localhost:8333 / :8080</text>
+
+  <!-- Docker + compose network -->
+  <rect x="96" y="286" width="528" height="316" rx="14" fill="#0f172a" stroke="#475569" stroke-width="1.5" stroke-dasharray="8 6"/>
+  <text x="118" y="312" fill="#64748b" font-size="15" font-weight="700">Docker: lakehouse-network (private)</text>
+
+  <!-- spark cluster group -->
+  <rect x="120" y="326" width="480" height="150" rx="14" fill="#111c33" stroke="#3b82f6" stroke-width="2.5"/>
+  <text x="360" y="352" fill="#f1f5f9" font-size="19" font-weight="700" text-anchor="middle">Spark cluster (image 4.1.0)</text>
+
+  <rect x="140" y="366" width="140" height="46" rx="8" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="210" y="389" fill="#93c5fd" font-size="14" font-weight="700" text-anchor="middle">spark-master</text>
+  <text x="210" y="405" fill="#60a5fa" font-size="11" font-family="monospace" text-anchor="middle">:7077 / UI :8080</text>
+
+  <rect x="290" y="366" width="130" height="46" rx="8" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="355" y="389" fill="#93c5fd" font-size="14" font-weight="700" text-anchor="middle">spark-worker</text>
+  <text x="355" y="405" fill="#60a5fa" font-size="11" font-family="monospace" text-anchor="middle">runs tasks</text>
+
+  <rect x="430" y="366" width="150" height="46" rx="8" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="505" y="389" fill="#93c5fd" font-size="14" font-weight="700" text-anchor="middle">spark-connect</text>
+  <text x="505" y="405" fill="#60a5fa" font-size="11" font-family="monospace" text-anchor="middle">gRPC :15002</text>
+
+  <text x="360" y="440" fill="#64748b" font-size="12.5" text-anchor="middle">worker + connect reach the master by service name</text>
+  <text x="360" y="458" fill="#60a5fa" font-size="12.5" font-family="monospace" text-anchor="middle">spark://spark-master:7077</text>
+
+  <!-- seaweedfs container -->
+  <rect x="150" y="492" width="420" height="94" rx="14" fill="#1e293b" stroke="#0ea5e9" stroke-width="2.5"/>
+  <text x="360" y="522" fill="#f1f5f9" font-size="20" font-weight="700" text-anchor="middle">seaweedfs</text>
+  <text x="360" y="546" fill="#38bdf8" font-size="14" text-anchor="middle">object store, S3 API on 8333, bucket s3://lakehouse</text>
+  <text x="360" y="570" fill="#64748b" font-size="12" text-anchor="middle">named volume: seaweedfs-data</text>
+
+  <!-- arrow client -> connect (published gRPC) -->
+  <line x1="221" y1="262" x2="221" y2="364" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrowblue4)"/>
+  <text x="150" y="300" fill="#3b82f6" font-size="11" text-anchor="start">15002:15002</text>
+
+  <!-- arrow AWS/browser -> published ports -->
+  <line x1="485" y1="262" x2="485" y2="324" stroke="#fbbf24" stroke-width="3" marker-end="url(#arrowamber4)"/>
+  <text x="500" y="300" fill="#fbbf24" font-size="11" text-anchor="start">published</text>
+
+  <!-- RIGHT: the layers still to come -->
+  <text x="960" y="132" fill="#64748b" font-size="20" font-weight="700" text-anchor="middle">Still to come</text>
+  <rect x="700" y="150" width="510" height="470" rx="18" fill="#0b1120" stroke="#1f2937" stroke-width="2"/>
+
+  <rect x="730" y="182" width="450" height="44" rx="8" fill="#0f172a" stroke="#243044" stroke-width="1.5"/>
+  <text x="955" y="210" fill="#475569" font-size="15" text-anchor="middle">Agents  (Chapter 12)</text>
+  <rect x="730" y="234" width="450" height="44" rx="8" fill="#0f172a" stroke="#243044" stroke-width="1.5"/>
+  <text x="955" y="262" fill="#475569" font-size="15" text-anchor="middle">AI  (Chapter 11)</text>
+  <rect x="730" y="286" width="450" height="44" rx="8" fill="#0f172a" stroke="#243044" stroke-width="1.5"/>
+  <text x="955" y="314" fill="#475569" font-size="15" text-anchor="middle">Serving  (Chapter 10)</text>
+  <rect x="730" y="338" width="450" height="44" rx="8" fill="#0f172a" stroke="#243044" stroke-width="1.5"/>
+  <text x="955" y="366" fill="#475569" font-size="15" text-anchor="middle">Orchestration / Streaming  (Chapters 8-9)</text>
+  <rect x="730" y="390" width="450" height="44" rx="8" fill="#0f172a" stroke="#243044" stroke-width="1.5"/>
+  <text x="955" y="418" fill="#475569" font-size="15" text-anchor="middle">Ingestion / Transformation  (Chapters 6-7)</text>
+
+  <!-- next up: Tables & Catalog -->
+  <rect x="730" y="452" width="450" height="96" rx="12" fill="#0b1120" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="955" y="482" fill="#93c5fd" font-size="15" font-weight="700" text-anchor="middle">Next chapter</text>
+  <text x="955" y="506" fill="#94a3b8" font-size="14" text-anchor="middle">Tables and Catalog: Iceberg via Unity Catalog OSS</text>
+  <text x="955" y="528" fill="#60a5fa" font-size="13" text-anchor="middle">Spark writes tables; server-side config wires the catalog</text>
+
+  <!-- done markers -->
+  <rect x="730" y="562" width="220" height="40" rx="8" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/>
+  <text x="840" y="588" fill="#38bdf8" font-size="14" text-anchor="middle">Storage (Ch 3)</text>
+  <rect x="960" y="562" width="220" height="40" rx="8" fill="#0f172a" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="1070" y="588" fill="#93c5fd" font-size="14" text-anchor="middle">Compute (Ch 4)</text>
+</svg>
