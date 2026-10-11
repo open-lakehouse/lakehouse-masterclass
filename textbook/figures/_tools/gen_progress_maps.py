@@ -93,8 +93,8 @@ TARGETS = [
     ("ch11", "fig-11.3-progress-ai-done.svg", 11, 11, "Progress: AI complete, Agents next"),
     ("ch12", "fig-12.1-progress-agents.svg", 11, 11, "Progress: building Agents"),
     ("ch12", "fig-12.3-progress-agents-done.svg", 12, 12, "Progress: Agents complete, Deploy next"),
-    ("ch13", "fig-13.3-progress-complete.svg", -1, 12, "Progress — every layer built"),
-    ("ch13", "fig-13.4-progress-complete.svg", -1, 12, "Your open lakehouse — complete"),
+    ("ch13", "fig-13.1-progress-complete.svg", -1, 12, "Progress: every layer built"),
+    ("ch13", "fig-13.3-progress-complete.svg", -1, 12, "Your open lakehouse, complete"),
 ]
 
 if __name__ == "__main__":
