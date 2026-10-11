@@ -45,11 +45,12 @@ This separation of concerns is a design principle, not just a detail. Airflow is
 
 ## Build: a scheduled medallion DAG
 
-Airflow is the most involved service in the stack: it's really several processes (a scheduler, an API/web server, and a metadata database). Rather than hand-write all of that, start from Airflow's official `docker-compose.yaml` (the project publishes one) and adapt it into your stack. Three adaptations are what matter:
+Airflow is the most involved service in the stack: it's really several processes (a scheduler, an API/web server, and a metadata database). Rather than hand-write all of that, start from Airflow's official `docker-compose.yaml` (the project publishes one) and adapt it into your stack. Four adaptations are what matter:
 
 1. **Join the same network.** Put the Airflow services on `lakehouse-network` so their tasks can reach `spark-connect:15002`, `seaweedfs:8333`, and `unity-catalog:8080` by service name.
 2. **Mount your DAGs folder.** Point Airflow's `dags/` volume at a `dags/` directory in your project so your DAG file is picked up.
 3. **Keep it small for local use.** `AIRFLOW__CORE__EXECUTOR=LocalExecutor` and `AIRFLOW__CORE__LOAD_EXAMPLES=false` keep the footprint sane on a laptop. The API/web UI comes up on port 8085.
+4. **Give the tasks what they call.** The DAG below runs `spark-pipelines` and talks to Spark Connect from inside the Airflow container, so that image needs the client installed (`pip install 'pyspark[pipelines]==4.1.0'`, via a custom Airflow image or `_PIP_ADDITIONAL_REQUIREMENTS`) and your `pipelines/` directory mounted (for example at `/opt/pipelines`) so the SDP project is on disk where the task's working directory expects it.
 
 Bring up the Airflow services and confirm the UI answers:
 
