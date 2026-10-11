@@ -85,31 +85,60 @@ services:
                tail -f /opt/spark/logs/*"
     ports:
       - "8080:8080"   # master web UI, at localhost:8080
+    networks:
+      - lakehouse-network
 
   spark-worker:
     image: apache/spark:4.1.0-scala2.13-java21-python3-r-ubuntu
     depends_on: [spark-master]
+    env_file: .env
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
     command: >
       bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
                tail -f /opt/spark/logs/*"
+    networks:
+      - lakehouse-network
 
   spark-connect:
     image: apache/spark:4.1.0-scala2.13-java21-python3-r-ubuntu
     depends_on: [spark-master, spark-worker]
+    env_file: .env
     environment:
       SPARK_NO_DAEMONIZE: "1"
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
     command: >
       /opt/spark/sbin/start-connect-server.sh
       --master spark://spark-master:7077
       --conf spark.connect.grpc.binding.host=0.0.0.0
-      --packages org.apache.spark:spark-connect_2.13:4.1.0
     ports:
       - "15002:15002"   # Spark Connect gRPC, at localhost:15002
     volumes:
       - ./config/spark:/opt/spark/conf   # server-side static config lives here
+    networks:
+      - lakehouse-network
 ```
 
-Notice how this uses the exact concepts from Chapter 2. All three services share the same pinned image, so their versions match and the stack is reproducible. They join the default Compose network automatically, so the worker reaches the master by service name at `spark://spark-master:7077`, and the Connect server reaches the master the same way, no IP addresses, no `localhost`. Only two ports are published to your host: the master web UI on `8080` and the Connect gRPC endpoint on `15002`, because those are the two you reach from your laptop. And the `spark-connect` service mounts `./config/spark` into the container's config directory: it's empty now, but that's where the server-side static config from Chapter 5 (the catalog and S3 settings) will live, exactly because a thin client can't set those.
+Notice how this uses the exact concepts from Chapter 2. All three services share the same pinned image, so their versions match and the stack is reproducible. They all join the `lakehouse-network` you defined in Chapter 3, so the worker reaches the master by service name at `spark://spark-master:7077`, and the Connect server reaches the master the same way, no IP addresses, no `localhost`. Only two ports are published to your host: the master web UI on `8080` and the Connect gRPC endpoint on `15002`, because those are the two you reach from your laptop. The worker and the Connect server also get your SeaweedFS credentials as `AWS_*` environment variables (Compose fills them from `.env`), because they are the processes that actually read and write object storage. And the `spark-connect` service mounts `./config/spark` into the container's config directory, which is where the server-side static config lives, the config a thin client cannot set. You create that config next.
+
+Step 1b. Create the Connect server's static config. Because a thin client cannot change static settings on a running Connect server (the `CANNOT_MODIFY_STATIC_CONFIG` rule from earlier), the jars and settings every later chapter needs have to be baked in at server start. Create `config/spark/spark-defaults.conf`:
+
+```properties
+# config/spark/spark-defaults.conf  (read by the Connect server at startup)
+
+# Jars for Iceberg, its AWS/S3 support, and Kafka (used in Chapters 5-8).
+spark.jars.packages      org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.12.0,org.apache.iceberg:iceberg-aws-bundle:1.12.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0
+spark.sql.extensions     org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+
+# Reach SeaweedFS over the S3 API, with path-style addressing and env-var creds.
+spark.hadoop.fs.s3a.endpoint                  http://seaweedfs:8333
+spark.hadoop.fs.s3a.path.style.access         true
+spark.hadoop.fs.s3a.aws.credentials.provider  org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider
+```
+
+You will add the catalog's own lines to this same file in Chapter 5. For now it gives the Connect server the Iceberg and S3 jars and tells Spark how to reach SeaweedFS, so the first time you create a table (next chapter) the engine is already wired for it. The first `up` after adding packages takes longer, since the Connect server downloads those jars from Maven once at startup.
 
 Step 2. Bring the new services up:
 
@@ -124,7 +153,7 @@ Expected: `docker compose ps` now shows `seaweedfs`, `spark-master`, `spark-work
 
 Step 3. Open the Spark UI to see the cluster. Visit `http://localhost:8080` in your browser. You should see one worker registered and no applications running yet. The Spark UI is one of the most useful debugging tools you have: it shows running jobs, how work was split into tasks, and where time is spent. Get in the habit of opening it; when a job is mysteriously slow later, the UI usually shows why (one partition doing all the work, a stage retrying, and so on).
 
-Step 4. Connect a thin client and run your first job. From your host, in a Python environment with `pyspark` installed (`pip install pyspark`):
+Step 4. Connect a thin client and run your first job. From your host, in a Python environment with `pyspark` installed. Pin it to match the server (`pip install 'pyspark==4.1.0'`), since a bare `pip install pyspark` now pulls a newer release than the 4.1.0 cluster, and a version skew between client and server causes confusing errors:
 
 ```python
 from pyspark.sql import SparkSession

@@ -84,14 +84,19 @@ Remember `CANNOT_MODIFY_STATIC_CONFIG` from Chapter 4? This is where it pays off
 The catalog wiring (the Iceberg SQL extensions, the REST catalog URI, the warehouse name, the S3 credentials Spark uses to reach object storage) is all static Spark configuration. It's set once, server-side, in the Connect server's `spark-defaults.conf`. Concretely, that wiring makes `iceberg` a REST catalog pointed at Unity Catalog's IRC endpoint:
 
 ```properties
-# in the Connect server's spark-defaults.conf, set once, server-side
-spark.sql.catalog.iceberg           = org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.iceberg.type      = rest
-spark.sql.catalog.iceberg.uri       = http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
-spark.sql.catalog.iceberg.warehouse = lakehouse
+# add to config/spark/spark-defaults.conf (the file you started in Chapter 4)
+spark.sql.catalog.iceberg                      = org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.iceberg.type                 = rest
+spark.sql.catalog.iceberg.uri                  = http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
+spark.sql.catalog.iceberg.warehouse            = lakehouse
+# Iceberg writes its own data + metadata files to SeaweedFS, so give its S3 client
+# the same endpoint and path-style setting:
+spark.sql.catalog.iceberg.io-impl              = org.apache.iceberg.aws.s3.S3FileIO
+spark.sql.catalog.iceberg.s3.endpoint          = http://seaweedfs:8333
+spark.sql.catalog.iceberg.s3.path-style-access = true
 ```
 
-Note the URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is the Unity Catalog catalog name, not an object-storage path. None of this is something your thin client injects at runtime.
+These lines make Spark the engine that actually writes Iceberg data and metadata to SeaweedFS, while Unity Catalog only records the commits over its REST API. That division is why native Iceberg writes work here even though the catalog itself doesn't move your bytes. Note the catalog URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is the Unity Catalog catalog name, not an object-storage path. None of this is something your thin client injects at runtime.
 
 Why is that good news rather than a limitation? Because it means your client code is gloriously boring. You connect over `sc://` and just write `spark.sql("CREATE TABLE ...")`, and the catalog is already wired, already authenticated, already pointed at the right storage. The platform owns the plumbing; you write logic. Every engineer who connects gets the same correct wiring for free, and nobody can accidentally point their session at the wrong catalog. Thin clients, central configuration: that's the Spark Connect philosophy from Chapter 4 doing real work.
 

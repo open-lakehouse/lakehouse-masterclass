@@ -174,7 +174,16 @@ deduped = (events
     .withWatermark("created_at", "10 minutes")          # tolerate 10 min lateness
     .dropDuplicatesWithinWatermark(["order_id"]))        # exactly-once per order
 
-query = (deduped.writeStream
+# Match the Bronze schema from Chapter 6: created_at stays a string (faithful
+# capture), plus the same ingestion-metadata columns, so the stream can write
+# the SAME table the batch job created.
+bronze = (deduped
+    .withColumn("created_at",   F.col("created_at").cast("string"))
+    .withColumn("_ingested_at", F.current_timestamp())
+    .withColumn("_source",      F.lit("orders-stream"))
+    .withColumn("_ingest_date", F.to_date(F.current_timestamp())))
+
+query = (bronze.writeStream
     .format("iceberg")
     .outputMode("append")
     .option("checkpointLocation", "s3a://lakehouse/_checkpoints/bronze_orders_stream")
@@ -183,7 +192,7 @@ query = (deduped.writeStream
 query.awaitTermination()   # long-running: this job doesn't "finish"
 ```
 
-**What just happened?** This is the train-in-the-tunnel scenario handled in three lines. `withWatermark("created_at", "10 minutes")` sets the kitchen's closing time, accept events up to 10 minutes late. `dropDuplicatesWithinWatermark(["order_id"])` lands each `order_id` exactly once even if the producer sent it three times. And `toTable("iceberg.bronze.orders_raw")` writes to the same Bronze table your batch job used; streaming is a different how, same destination. Finally, `awaitTermination()` reflects that this job never finishes; it runs until you stop it.
+**What just happened?** This is the train-in-the-tunnel scenario handled in a few lines. `withWatermark("created_at", "10 minutes")` sets the kitchen's closing time, accept events up to 10 minutes late. `dropDuplicatesWithinWatermark(["order_id"])` lands each `order_id` exactly once even if the producer sent it three times. Then you shape the rows to match the Bronze table the batch job created in Chapter 6, the same `_ingested_at` / `_source` / `_ingest_date` metadata columns, with `created_at` kept as a string, so the schema lines up. And `toTable("iceberg.bronze.orders_raw")` writes to the same Bronze table; streaming is a different how, same destination. Finally, `awaitTermination()` reflects that this job never finishes; it runs until you stop it. (`F` here is `pyspark.sql.functions`, imported in Step 3.)
 
 **Step 5: from another client, watch the Bronze count climb as events flow.**
 

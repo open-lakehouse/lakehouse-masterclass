@@ -159,10 +159,18 @@ services:
       - "8333:8333"   # S3 API, reachable from your host at localhost:8333
     volumes:
       - seaweedfs-data:/data
+    networks:
+      - lakehouse-network
 
 volumes:
   seaweedfs-data:
+
+networks:
+  lakehouse-network:
+    driver: bridge
 ```
+
+That top-level `networks:` block defines one shared bridge network for the whole stack. Every service you add in later chapters joins `lakehouse-network`, which is how they find each other by service name (`seaweedfs:8333`, `spark-connect:15002`, and so on). You define it once here, with your first service, and reference it everywhere after.
 
 There's one subtlety worth stopping on, because it's a real security trap. If you just run `weed server -s3` with no config, SeaweedFS serves its S3 endpoint **wide open**, no credentials required. Passing the access key and secret as plain environment variables does *not* secure it; the S3 server only enforces credentials when you give it an identities config with `-s3.config`. That's what the `entrypoint` above does: it writes a small JSON identities file from your `.env` values at startup, then starts the server pointed at it, so the endpoint actually requires the access key and secret to read or write. This matters even locally, because Chapter 2's whole point was to build good habits before the stakes are real.
 
