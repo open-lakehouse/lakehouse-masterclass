@@ -118,12 +118,14 @@ services:
     ports:
       - "15002:15002"   # Spark Connect gRPC, at localhost:15002
     volumes:
-      - ./config/spark:/opt/spark/conf   # server-side static config lives here
+      # Overlay just this one file. Mounting the whole ./config/spark dir over
+      # /opt/spark/conf would hide the image's other config (log4j2, spark-env).
+      - ./config/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf
     networks:
       - lakehouse-network
 ```
 
-Notice how this uses the exact concepts from Chapter 2. All three services share the same pinned image, so their versions match and the stack is reproducible. They all join the `lakehouse-network` you defined in Chapter 3, so the worker reaches the master by service name at `spark://spark-master:7077`, and the Connect server reaches the master the same way, no IP addresses, no `localhost`. Only two ports are published to your host: the master web UI on `8080` and the Connect gRPC endpoint on `15002`, because those are the two you reach from your laptop. The worker and the Connect server also get your SeaweedFS credentials as `AWS_*` environment variables (Compose fills them from `.env`), because they are the processes that actually read and write object storage. And the `spark-connect` service mounts `./config/spark` into the container's config directory, which is where the server-side static config lives, the config a thin client cannot set. You create that config next.
+Notice how this uses the exact concepts from Chapter 2. All three services share the same pinned image, so their versions match and the stack is reproducible. They all join the `lakehouse-network` you defined in Chapter 3, so the worker reaches the master by service name at `spark://spark-master:7077`, and the Connect server reaches the master the same way, no IP addresses, no `localhost`. Only two ports are published to your host: the master web UI on `8080` and the Connect gRPC endpoint on `15002`, because those are the two you reach from your laptop. The worker and the Connect server also get your SeaweedFS credentials as `AWS_*` environment variables (Compose fills them from `.env`), because they are the processes that actually read and write object storage. And the `spark-connect` service mounts your `spark-defaults.conf` into the container's config directory as a single file (not the whole directory, so the image's other config such as logging stays intact), which is where the server-side static config lives, the config a thin client cannot set. You create that file next.
 
 Step 1b. Create the Connect server's static config. Because a thin client cannot change static settings on a running Connect server (the `CANNOT_MODIFY_STATIC_CONFIG` rule from earlier), the jars and settings every later chapter needs have to be baked in at server start. Create `config/spark/spark-defaults.conf`:
 
@@ -214,7 +216,7 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 - **Client hangs or "connection refused" on `sc://localhost:15002`.** The Connect server isn't up yet, or is still starting. Run `docker compose ps` to confirm `spark-connect` is running, and `docker compose logs spark-connect` to see why if it isn't. On the first `up` it can take a minute to download the `spark-connect` package.
 - **`pyspark.errors.exceptions.connect.*` traceback.** That's a Connect-style error; the last line is usually the real message. Read it before scrolling up through the gRPC noise.
 - **Code fails with something about `sparkContext` or RDDs.** You're using an API Connect doesn't expose. Rewrite it in DataFrame or SQL terms; there's almost always a direct equivalent.
-- **`CANNOT_MODIFY_STATIC_CONFIG`.** You tried to set a static config from the client. It has to be set server-side, in the mounted `config/spark` directory; you'll see how in Chapter 5.
+- **`CANNOT_MODIFY_STATIC_CONFIG`.** You tried to set a static config from the client. It has to be set server-side, in the mounted `spark-defaults.conf`; you'll see how in Chapter 5.
 - **UDF errors about Python versions.** The client and server Python environments differ. Since you're driving the containerized server from your host, keep your local Python close to the server's version (the image ships Python 3).
 - **The worker doesn't register with the master.** Check `docker compose logs spark-worker`. The usual cause is the master wasn't ready yet; `depends_on` starts it first, but if the worker raced ahead, `docker compose restart spark-worker` fixes it.
 

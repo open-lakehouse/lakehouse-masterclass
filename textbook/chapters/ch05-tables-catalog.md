@@ -88,7 +88,7 @@ The catalog wiring (the Iceberg SQL extensions, the REST catalog URI, the wareho
 spark.sql.catalog.iceberg                      = org.apache.iceberg.spark.SparkCatalog
 spark.sql.catalog.iceberg.type                 = rest
 spark.sql.catalog.iceberg.uri                  = http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
-spark.sql.catalog.iceberg.warehouse            = lakehouse
+spark.sql.catalog.iceberg.warehouse            = iceberg
 # Iceberg writes its own data + metadata files to SeaweedFS, so give its S3 client
 # the same endpoint and path-style setting:
 spark.sql.catalog.iceberg.io-impl              = org.apache.iceberg.aws.s3.S3FileIO
@@ -138,13 +138,29 @@ docker compose up -d unity-catalog
 docker compose ps
 ```
 
-Expected: `unity-catalog` shows up alongside `seaweedfs` and the Spark services, state `running`. Confirm the Iceberg REST endpoint is actually answering by curling it from your host:
+Expected: `unity-catalog` shows up alongside `seaweedfs` and the Spark services, state `running`. Confirm it is answering by listing the catalogs it already has. A fresh Unity Catalog ships with a single built-in catalog named `unity`:
 
 ```bash
-curl -s http://localhost:8081/api/2.1/unity-catalog/iceberg/v1/config
+curl -s http://localhost:8081/api/2.1/unity-catalog/catalogs
 ```
 
-A JSON response means the catalog is live and speaking the Iceberg REST protocol. If the container is not running or the curl hangs, jump to troubleshooting before continuing: creating a table against a half-started catalog produces confusing errors.
+A JSON response listing `unity` means the server is live. If the container is not running or the curl hangs, jump to troubleshooting before continuing: creating a table against a half-started catalog produces confusing errors.
+
+**Step 1b: create the `iceberg` catalog.** Your `spark-defaults.conf` points Spark at `warehouse = iceberg`, which is the name of a Unity Catalog *catalog*. That catalog doesn't exist yet (only `unity` does), so create it once:
+
+```bash
+curl -s -X POST http://localhost:8081/api/2.1/unity-catalog/catalogs \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "iceberg", "comment": "The lakehouse catalog, served over the Iceberg REST protocol"}'
+```
+
+Now confirm the Iceberg REST endpoint resolves it. The protocol takes the catalog name as a `warehouse` query parameter:
+
+```bash
+curl -s "http://localhost:8081/api/2.1/unity-catalog/iceberg/v1/config?warehouse=iceberg"
+```
+
+A JSON config response means the catalog is live, speaking the Iceberg REST protocol, and Spark will find it under the name `iceberg`. (Catalog names, the exact REST shape, and whether your Unity Catalog version wants a storage root on the catalog can vary by release; confirm against the version you run, and see troubleshooting if a later table creation complains about a storage location.)
 
 **Step 2: connect a thin client and create a namespace and a table.** The catalog name `iceberg` and the REST wiring are configured server-side (see the callout above), so from the client you simply use them:
 
@@ -171,9 +187,11 @@ spark.sql("""
 
 **What just happened?** Even before you inserted a single row, Iceberg wrote
 *metadata* to object storage: a `metadata.json` file describing the table's schema,
-a pointer registered in the catalog, and an initial (empty) snapshot. The catalog
-now knows `iceberg.bronze.orders` exists, what shape it has, and where its metadata
-lives. The table is real; it just has no data yet.
+registered under a pointer in the catalog. Note what it did *not* write: a snapshot.
+A snapshot records a specific set of data files, and a freshly created table has had
+no data operation yet, so it has none. The catalog now knows `iceberg.bronze.orders`
+exists, what shape it has, and where its metadata lives. The table is real; it just
+has no data, and no snapshots, yet.
 
 **Step 3: insert a few rows and read them back:**
 
@@ -202,10 +220,10 @@ Expected output:
 
 **What just happened?** That `INSERT` did not edit an existing file. Iceberg wrote one or more new Parquet data files, then wrote new metadata declaring a fresh snapshot whose file list includes them. The catalog's pointer moved to that new snapshot atomically. This is the ACID guarantee in action: until that pointer flips, no reader sees the half-written state; the instant it flips, every reader sees the complete new version. There is never an in-between.
 
-**Step 4: verify the catalog knows the table, independent of Spark.** Ask the Iceberg REST endpoint directly, with no Spark involved, to list the tables in the `bronze` namespace:
+**Step 4: verify the catalog knows the table, independent of Spark.** Ask the Iceberg REST endpoint directly, with no Spark involved, to list the tables in the `bronze` namespace. The protocol scopes calls under a prefix that the `config` call above returned for your warehouse; for the `iceberg` catalog that prefix is `catalogs/iceberg`:
 
 ```bash
-curl -s http://localhost:8081/api/2.1/unity-catalog/iceberg/v1/namespaces/bronze/tables
+curl -s http://localhost:8081/api/2.1/unity-catalog/iceberg/v1/catalogs/iceberg/namespaces/bronze/tables
 ```
 
 You should see `orders` in the response. Different client, same catalog, same table: a tiny preview of Chapter 10, where a completely different engine reads these exact rows.
@@ -251,7 +269,7 @@ spark.sql("SELECT made_current_at, snapshot_id, is_current_ancestor "
           "FROM iceberg.bronze.orders.history").show(truncate=False)
 ```
 
-Expected: `.snapshots` shows two rows so far (the initial create and your insert, an `append`). `.files` shows the Parquet file(s) your insert produced, with a `record_count` of 3. `.history` shows the order in which snapshots became current. You are literally reading the tree from Figure 5.3.
+Expected: `.snapshots` shows one row so far, your insert, recorded as an `append`. (The `CREATE TABLE` itself made no snapshot: snapshots record data operations, and the empty create had none.) `.files` shows the Parquet file(s) your insert produced, with a `record_count` of 3. `.history` shows the order in which snapshots became current. You are literally reading the tree from Figure 5.3.
 
 ## Schema evolution: change the shape, keep the data
 
@@ -353,15 +371,17 @@ Real learning includes the errors. Here are the ones you're most likely to hit i
 - **`CANNOT_MODIFY_STATIC_CONFIG` when you try to set a catalog option from the
   client.** Exactly the Chapter 4 lesson: catalog wiring is static, server-side. Don't set `spark.sql.catalog.*` from your `sc://` session; it's already configured. If it's genuinely misconfigured, fix `spark-defaults.conf` on the server and restart it, not the client.
 
-- **`ConnectException` / cannot reach the catalog.** Unity Catalog OSS isn't up, or isn't healthy yet. Run `docker compose ps`; if `unity-catalog` isn't running, bring it up and curl the config endpoint on 8081 before creating tables.
+- **`ConnectException` / cannot reach the catalog.** Unity Catalog OSS isn't up, or isn't healthy yet. Run `docker compose ps`; if `unity-catalog` isn't running, bring it up and curl the catalogs endpoint on 8081 before creating tables.
+
+- **`NoSuchCatalogException` / the warehouse can't be found when Spark connects.** You skipped Step 1b. Unity Catalog ships only a `unity` catalog, but Spark is pointed at one named `iceberg`. Create it with the `POST .../catalogs` call, then retry. If table creation then fails with a storage or location error instead, your Unity Catalog version wants a storage root on the catalog; recreate it including your bucket path (`s3://lakehouse/warehouse`) as the storage root.
 
 - **`TableAlreadyExistsException`.** You ran a `CREATE TABLE` (without `IF NOT
   EXISTS`) against a table that's already there. Either add `IF NOT EXISTS` or drop
   it first if you meant to recreate it.
 
 - **Rollback "works" but you still see no rows.** You rolled back to the *wrong*
-  snapshot (e.g. the empty initial-create snapshot). Re-check `.snapshots`, pick the
-  `append` snapshot that has your data, and roll back to that one.
+  snapshot, one from before the rows you wanted were inserted. Re-check `.snapshots`,
+  pick the `append` snapshot that has your data, and roll back to that one.
 
 - **A stray/typo'd column in `INSERT ... VALUES` order.** Iceberg maps positional `VALUES` to the current schema order. After a schema change, re-check column order, an easy way to silently put `channel` values into `status`.
 

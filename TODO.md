@@ -50,10 +50,23 @@ BLOCKED by RAM (environment ceiling, not a course bug):
   from source) OOM-kill on this ~8GB box (Spark+Iceberg too heavy). Could not
   complete at runtime here. Verify these on a >=16GB box, or via Docker once the
   official UC 0.7 image ships.
-STILL TO APPLY (from source-level reading, not yet runtime-verified):
-- Ch5: add a step creating the UC catalog `lakehouse` with a storage_root (UC
-  ships only `unity`); fix curl paths to `.../iceberg/v1/config?warehouse=lakehouse`
-  and `.../iceberg/v1/catalogs/lakehouse/namespaces/bronze/tables`.
-- Ch5: `.snapshots` shows 1 row after the first insert (CREATE makes no snapshot).
-- Ch4 Docker note: mounting ./config/spark over /opt/spark/conf replaces the
-  image's whole conf dir; mount just spark-defaults.conf, or copy defaults in.
+APPLIED 2026-10-11 (source-level, still not runtime-verified; confirm on first >=16GB / Docker run):
+- Ch5: added Step 1b creating the UC catalog `iceberg` (POST .../catalogs). Renamed
+  the warehouse/UC-catalog from `lakehouse` to `iceberg` so it matches the Spark
+  catalog alias used everywhere (`iceberg.bronze.orders`), removing the alias vs
+  warehouse-name mismatch. Changed `spark.sql.catalog.iceberg.warehouse = iceberg`.
+- Ch5: curl paths fixed to `.../iceberg/v1/config?warehouse=iceberg` and
+  `.../iceberg/v1/catalogs/iceberg/namespaces/bronze/tables` (IRC prefix form).
+- Ch5: `.snapshots` now says 1 row after the first insert (CREATE makes no snapshot);
+  Step 2 "what just happened" and the rollback pitfall reworded to match.
+- Ch5: added a troubleshooting bullet for NoSuchCatalogException / storage-root.
+- CONFIRM ON FIRST RUN: exact UC 0.7 catalog-create REST shape, the IRC prefix
+  (`catalogs/iceberg`), and whether the catalog needs an explicit storage_root.
+
+- Ch4: changed the Spark Connect mount from `./config/spark:/opt/spark/conf` (which
+  would hide the image's other conf files) to a single-file overlay
+  `./config/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf`.
+
+(All source-level verification items now applied. Remaining work is a true runtime
+run on a >=16GB / Docker-capable host, and swapping in the official UC 0.7 image
+when it publishes.)
