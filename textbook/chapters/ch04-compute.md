@@ -95,6 +95,7 @@ services:
     environment:
       AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_REGION: us-east-1
     command: >
       bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
                tail -f /opt/spark/logs/*"
@@ -109,6 +110,7 @@ services:
       SPARK_NO_DAEMONIZE: "1"
       AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
+      AWS_REGION: us-east-1
     command: >
       /opt/spark/sbin/start-connect-server.sh
       --master spark://spark-master:7077
@@ -129,13 +131,17 @@ Step 1b. Create the Connect server's static config. Because a thin client cannot
 # config/spark/spark-defaults.conf  (read by the Connect server at startup)
 
 # Jars for Iceberg, its AWS/S3 support, and Kafka (used in Chapters 5-8).
-spark.jars.packages      org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.12.0,org.apache.iceberg:iceberg-aws-bundle:1.12.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0
+spark.jars.packages      org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.12.0,org.apache.iceberg:iceberg-aws-bundle:1.12.0,org.apache.hadoop:hadoop-aws:3.4.1,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0
 spark.sql.extensions     org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
 
 # Reach SeaweedFS over the S3 API, with path-style addressing and env-var creds.
 spark.hadoop.fs.s3a.endpoint                  http://seaweedfs:8333
 spark.hadoop.fs.s3a.path.style.access         true
 spark.hadoop.fs.s3a.aws.credentials.provider  org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider
+
+# Iceberg's S3FileIO and the AWS SDK v2 both require a region, even against
+# SeaweedFS; it is supplied by the AWS_REGION env var on the Spark services.
+spark.sql.catalog.iceberg.s3.region           us-east-1
 ```
 
 You will add the catalog's own lines to this same file in Chapter 5. For now it gives the Connect server the Iceberg and S3 jars and tells Spark how to reach SeaweedFS, so the first time you create a table (next chapter) the engine is already wired for it. The first `up` after adding packages takes longer, since the Connect server downloads those jars from Maven once at startup.

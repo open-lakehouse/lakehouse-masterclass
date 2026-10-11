@@ -32,5 +32,28 @@ part of the textbook and students never need it.
 - UC -> SeaweedFS: assume Spark's S3FileIO performs the data/metadata I/O
   (SeaweedFS endpoint + path-style set in spark-defaults.conf); UC only records
   the IRC commits. CONFIRM on the first real run.
-- Runtime end-to-end verification still pending: needs a Docker-capable box, or
-  explicit permission to download and run the service binaries natively.
+## Native (no-Docker) verification run, 2026-10-11 (orchestrator, via sys_os_shell)
+VERIFIED on this box:
+- Stage 1 (Ch3 SeaweedFS 3.80): unauth -> 403; wrong key -> InvalidAccessKeyId;
+  right key + path-style round-trip IDENTICAL. Auth model is correct.
+- Stage 2 (Ch4 Spark 4.1 + Connect): spark.range(5) over sc://localhost:15002
+  worked, and start-connect-server.sh came up WITHOUT an explicit
+  --packages spark-connect. Ch4's drop of that package is correct.
+FIXES CONFIRMED + APPLIED from the run:
+- hadoop-aws was MISSING: a catalog/`s3a://` read throws
+  ClassNotFoundException org.apache.hadoop.fs.s3a.S3AFileSystem. Added
+  hadoop-aws:3.4.1 to spark-defaults.conf (Ch4). Needed by Ch6's s3a JSON read.
+- AWS region: S3FileIO / AWS SDK v2 need a region even for SeaweedFS. Added
+  AWS_REGION env to the Spark services + spark.sql.catalog.iceberg.s3.region (Ch4/5).
+BLOCKED by RAM (environment ceiling, not a course bug):
+- Stage 3 (native Iceberg write to SeaweedFS via S3FileIO) and Stage 4 (UC 0.7
+  from source) OOM-kill on this ~8GB box (Spark+Iceberg too heavy). Could not
+  complete at runtime here. Verify these on a >=16GB box, or via Docker once the
+  official UC 0.7 image ships.
+STILL TO APPLY (from source-level reading, not yet runtime-verified):
+- Ch5: add a step creating the UC catalog `lakehouse` with a storage_root (UC
+  ships only `unity`); fix curl paths to `.../iceberg/v1/config?warehouse=lakehouse`
+  and `.../iceberg/v1/catalogs/lakehouse/namespaces/bronze/tables`.
+- Ch5: `.snapshots` shows 1 row after the first insert (CREATE makes no snapshot).
+- Ch4 Docker note: mounting ./config/spark over /opt/spark/conf replaces the
+  image's whole conf dir; mount just spark-defaults.conf, or copy defaults in.
