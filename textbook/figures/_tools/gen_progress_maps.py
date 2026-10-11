@@ -91,8 +91,8 @@ TARGETS = [
     ("ch10", "fig-10.3-progress-serving-done.svg", 10, 10, "Progress: Serving complete, AI next"),
     ("ch11", "fig-11.1-progress-ai.svg", 10, 10, "Progress: building AI"),
     ("ch11", "fig-11.3-progress-ai-done.svg", 11, 11, "Progress: AI complete, Agents next"),
-    ("ch12", "fig-12.3-progress-agents.svg", 11, 11, "Progress — building: Agents"),
-    ("ch12", "fig-12.4-progress-agents-done.svg", 12, 12, "Progress — Agents complete, Deploy next"),
+    ("ch12", "fig-12.1-progress-agents.svg", 11, 11, "Progress: building Agents"),
+    ("ch12", "fig-12.3-progress-agents-done.svg", 12, 12, "Progress: Agents complete, Deploy next"),
     ("ch13", "fig-13.3-progress-complete.svg", -1, 12, "Progress — every layer built"),
     ("ch13", "fig-13.4-progress-complete.svg", -1, 12, "Your open lakehouse — complete"),
 ]
