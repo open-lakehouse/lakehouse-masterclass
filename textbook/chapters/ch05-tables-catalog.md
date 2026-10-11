@@ -68,6 +68,8 @@ The mechanism that makes this work is the Iceberg REST catalog (IRC), an open, s
 http://localhost:8081/api/2.1/unity-catalog/iceberg
 ```
 
+One version detail matters here, because it's the reason we pin a recent Unity Catalog. Earlier UC releases exposed this endpoint read-only: engines could list and read tables through it, but not create or commit them. Unity Catalog OSS 0.7 added the write side of the Iceberg REST protocol (create table, commit, update, drop), which is what lets you create and write native Iceberg tables through the catalog rather than only read them. That single capability is why the whole course can stay native Iceberg end to end while keeping one catalog for everything. Pin 0.7 or newer.
+
 Any engine that speaks the Iceberg REST protocol (Spark, DuckDB, Trino, DataFusion, and a growing list of others) points at that one URL and immediately sees the same tables, the same schemas, the same current snapshots. No per-engine metastore to keep in sync. No export step. No "let me copy that table into a format your tool understands."
 
 > **Multi-engine / interoperability** *(canonical term)*: the same open tables, read
@@ -79,7 +81,17 @@ You won't feel the full payoff until Chapter 10 (Serving), where you'll query th
 
 Remember `CANNOT_MODIFY_STATIC_CONFIG` from Chapter 4? This is where it pays off.
 
-The catalog wiring (the Iceberg SQL extensions, the REST catalog URI, the warehouse location, the S3 credentials Spark uses to reach object storage) is all static Spark configuration. It's set once, server-side, in the Connect server's `spark-defaults.conf`. It is not something your thin client injects at runtime.
+The catalog wiring (the Iceberg SQL extensions, the REST catalog URI, the warehouse name, the S3 credentials Spark uses to reach object storage) is all static Spark configuration. It's set once, server-side, in the Connect server's `spark-defaults.conf`. Concretely, that wiring makes `iceberg` a REST catalog pointed at Unity Catalog's IRC endpoint:
+
+```properties
+# in the Connect server's spark-defaults.conf, set once, server-side
+spark.sql.catalog.iceberg           = org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.iceberg.type      = rest
+spark.sql.catalog.iceberg.uri       = http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
+spark.sql.catalog.iceberg.warehouse = lakehouse
+```
+
+Note the URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is the Unity Catalog catalog name, not an object-storage path. None of this is something your thin client injects at runtime.
 
 Why is that good news rather than a limitation? Because it means your client code is gloriously boring. You connect over `sc://` and just write `spark.sql("CREATE TABLE ...")`, and the catalog is already wired, already authenticated, already pointed at the right storage. The platform owns the plumbing; you write logic. Every engineer who connects gets the same correct wiring for free, and nobody can accidentally point their session at the wrong catalog. Thin clients, central configuration: that's the Spark Connect philosophy from Chapter 4 doing real work.
 
@@ -87,27 +99,34 @@ Why is that good news rather than a limitation? Because it means your client cod
 
 Time to make a real table. Spark should still be up from Chapter 4; now you add the catalog as the next service in the same `docker-compose.yml`.
 
-**Step 1: add Unity Catalog OSS to your Compose file.** It joins the same `lakehouse-network`, so Spark reaches it by service name and you reach it from your host on a published port. It needs to know where the warehouse lives (your SeaweedFS bucket) and the S3 credentials to hand out, which come from the `.env` you set up in Chapter 2.
+**Step 1: add Unity Catalog OSS to your Compose file.** It joins the same `lakehouse-network`, so Spark reaches it by service name (`unity-catalog:8080`) and you reach it from your host on the published port (`localhost:8081`). Unity Catalog reads its configuration from a `server.properties` file you mount in, which is where you point it at your SeaweedFS bucket as managed storage.
 
 ```yaml
   unity-catalog:
-    image: unitycatalog/unitycatalog:0.2.1
+    image: unitycatalog/unitycatalog:v0.7.0   # 0.7+ exposes a writable Iceberg REST catalog
     container_name: unity-catalog
     depends_on:
       - seaweedfs
-    environment:
-      # Where tables physically live, and how to reach the object store.
-      S3_ENDPOINT: http://seaweedfs:8333
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
-      S3_SECRET_KEY: ${S3_SECRET_KEY}
-      WAREHOUSE: s3a://lakehouse/warehouse
+    volumes:
+      - ./config/unity-catalog/server.properties:/home/unitycatalog/etc/conf/server.properties
     ports:
-      - "8081:8081"
+      - "8081:8080"      # host 8081 maps to container 8080
     networks:
       - lakehouse-network
 ```
 
-Pin the image to a specific version rather than `latest`, so your build is reproducible. Then bring it up and confirm it is healthy:
+Create `config/unity-catalog/server.properties` to tell Unity Catalog where its storage lives and how to reach the object store. Fill the key and secret with the same values you put in `.env` in Chapter 2 (a properties file is read literally, so it does not expand `.env` for you):
+
+```properties
+# config/unity-catalog/server.properties
+s3.bucketPath.0=s3://lakehouse/warehouse
+s3.endpoint.0=http://seaweedfs:8333
+s3.accessKey.0=<same value as S3_ACCESS_KEY in your .env>
+s3.secretKey.0=<same value as S3_SECRET_KEY in your .env>
+s3.pathStyleAccess.0=true
+```
+
+These property names track the Unity Catalog OSS 0.7 `server.properties` reference; confirm them against the exact version you run. Pin the image to a specific version rather than `latest` so your build is reproducible. Then bring it up and confirm it is healthy:
 
 ```bash
 docker compose up -d unity-catalog
