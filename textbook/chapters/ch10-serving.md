@@ -64,8 +64,8 @@ spark.table("iceberg.gold.daily_revenue").orderBy("order_date").show()
 INSTALL iceberg; LOAD iceberg;
 
 -- Attach the SAME Unity Catalog OSS Iceberg REST endpoint Spark uses.
--- 'lakehouse' is the Unity Catalog catalog name (the warehouse from Chapter 5).
-ATTACH 'lakehouse' AS uc (
+-- 'iceberg' is the Unity Catalog catalog name (the warehouse you created in Chapter 5).
+ATTACH 'iceberg' AS uc (
     TYPE iceberg,
     ENDPOINT 'http://localhost:8081/api/2.1/unity-catalog/iceberg'
 );
