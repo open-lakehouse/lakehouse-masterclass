@@ -17,6 +17,56 @@ By the end of this chapter you'll be able to:
 - Tear the local lakehouse down cleanly, understanding what's preserved versus wiped.
 - Name concrete next steps to deepen each layer.
 
+## What you built: one real repository
+
+Before the victory lap, look at the actual artifact. Everything in this course accreted into one coherent, installable project, not a folder of disconnected scripts:
+
+```
+open-lakehouse/
+├── docker-compose.yml      # every service: SeaweedFS, Spark, Unity Catalog, Kafka, Airflow, MLflow
+├── pyproject.toml          # the installable `lakehouse` package
+├── Makefile                # one-command operations (below)
+├── .env / .env.example     # secrets, gitignored
+├── config/
+│   ├── spark/spark-defaults.conf
+│   └── unity-catalog/server.properties
+├── lakehouse/              # the shared package every layer imports
+│   ├── config.py           # one source of truth for endpoints + catalog name
+│   ├── session.py          # get_spark() factory
+│   ├── generate.py         # the source-data generator
+│   ├── ingest.py           # idempotent, date-parameterized Bronze ingest
+│   └── quality.py          # reusable Silver cleaning
+├── pipelines/medallion/    # the SDP project (Silver + Gold)
+├── dags/medallion.py       # Airflow DAG, imports lakehouse.ingest
+├── ml/train.py             # MLflow training on Gold
+├── tests/test_quality.py   # unit test for the cleaning rules
+└── AGENTS.md               # how an agent operates the stack
+```
+
+Notice the shape: `lakehouse/` holds the logic once, and `dags/`, `ml/`, `pipelines/`, and `tests/` all import from it. The DAG runs the same `ingest_orders` you call by hand; the pipeline cleans with the same `clean_orders` the test verifies. That one-definition-per-thing is what separates a real codebase from a pile of chapter snippets, and it's why this is a stack you could actually keep running rather than a demo you'd throw away.
+
+## Operate it with one command
+
+Production systems don't make you memorize a dozen incantations. Tie the common operations together in a `Makefile` at the repo root (recipe lines are tab-indented):
+
+```makefile
+up:            # bring the whole stack up
+	docker compose up -d
+down:          # stop everything, keep data volumes
+	docker compose down
+ps:            # health check
+	docker compose ps
+ingest:        # generate + land a Bronze batch
+	python -m lakehouse.generate
+	python -m lakehouse.ingest 2026-01-05
+pipeline:      # build Silver + Gold
+	cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002
+test:          # run the tests
+	pytest tests/
+```
+
+Now the whole lifecycle is `make up`, `make ingest`, `make pipeline`, `make test`, `make down`. That is the operator surface a teammate, or an agent (Chapter 12), drives, and it's the final touch that makes the project feel like a product instead of an exercise.
+
 ## Self-hosted vs. managed
 
 > **Self-hosted vs. managed** *(canonical term)*: you run the infrastructure yourself (this whole course) versus a cloud vendor runs it for you (EMR, Databricks, MSK, managed Airflow).
@@ -147,6 +197,7 @@ Every layer, built by you, running on your own machine, entirely open source. If
 
 ## Recap
 
+- What you built is one installable `lakehouse` project with a shared package, SDP pipelines, DAGs, training, tests, and a `Makefile`, operated with one command, not a pile of snippets.
 - Self-hosted (this course) and managed run the same open stack; open standards make migration a lift, not a rewrite, the anti-lock-in bet from Chapter 1 paying off.
 - The cloud path is Terraform, declarative infrastructure, toured here without cost; "declare the end state, let the tool converge" recurs at every layer.
 - Teardown is one command; `docker compose down` preserves data, `docker compose down -v` wipes it. Reversible steps can be automatic, irreversible ones deserve a pause.
