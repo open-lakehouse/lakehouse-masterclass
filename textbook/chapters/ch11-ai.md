@@ -247,7 +247,7 @@ A note on honesty about the model itself: a regression with a near-perfect `r2` 
 ## Try it yourself
 
 1. **Run the comparison for real.** Train three times with different features or parameters, then sort the runs by `r2` in the UI and identify the best. You've now used tracking the way real teams do.
-2. **Prove reproducibility.** Copy the `gold_snapshot_id` from a run in the UI, refresh Gold (re-run Chapter 7's two refreshes, or let the DAG run), then read `spark.read.option("versionAsOf", <id>).table("iceberg.gold.daily_revenue")` and compare it to what the run trained on (`training_rows`). The current table moved on; the snapshot didn't.
+2. **Prove reproducibility.** Copy the `gold_snapshot_id` from a run in the UI, refresh Gold (re-run Chapter 7's pipeline, or let the DAG run), then read `spark.read.option("versionAsOf", <id>).table("iceberg.gold.daily_revenue")` and compare it to what the run trained on (`training_rows`). The current table moved on; the snapshot didn't.
 3. **Promote a version.** MLflow 3 promotes models with *aliases* rather than the older fixed stages. Point an alias at a version with `mlflow.MlflowClient().set_registered_model_alias("orders-order-count", "staging", <version>)`, then load it by role instead of number: `mlflow.sklearn.load_model("models:/orders-order-count@staging")`. Move the alias to a newer version and the same load picks it up. "What's the current staging model?" is now a precise answer, not a guess.
 4. **Explain the pattern.** In two sentences, explain to an imaginary ML colleague why training on a Gold Iceberg table beats training on an exported CSV.
 

@@ -5,41 +5,34 @@
 
   <!-- tasks -->
   <g>
-    <rect x="60" y="250" width="245" height="120" rx="16" fill="#1f2937" stroke="#94a3b8" stroke-width="3" stroke-dasharray="8 6"/>
-    <text x="182" y="300" fill="#e5e7eb" font-size="22" font-weight="700" text-anchor="middle">land_raw</text>
-    <text x="182" y="332" fill="#cbd5e1" font-size="14" text-anchor="middle">the day's raw export</text>
-    <text x="182" y="354" fill="#cbd5e1" font-size="13" text-anchor="middle">(stand-in source, Ch 6)</text>
+    <rect x="100" y="250" width="290" height="120" rx="16" fill="#1f2937" stroke="#94a3b8" stroke-width="3" stroke-dasharray="8 6"/>
+    <text x="245" y="300" fill="#e5e7eb" font-size="22" font-weight="700" text-anchor="middle">land_raw</text>
+    <text x="245" y="332" fill="#cbd5e1" font-size="14" text-anchor="middle">the day's raw export</text>
+    <text x="245" y="354" fill="#cbd5e1" font-size="13" text-anchor="middle">(stand-in source, Ch 6)</text>
 
-    <rect x="365" y="250" width="245" height="120" rx="16" fill="#3a2410" stroke="#d97706" stroke-width="3"/>
-    <text x="487" y="300" fill="#fed7aa" font-size="22" font-weight="700" text-anchor="middle">ingest_bronze</text>
-    <text x="487" y="332" fill="#fdba74" font-size="14" text-anchor="middle">land one day in Bronze</text>
-    <text x="487" y="354" fill="#fdba74" font-size="13" text-anchor="middle">(idempotent, Ch 6)</text>
+    <rect x="495" y="250" width="290" height="120" rx="16" fill="#3a2410" stroke="#d97706" stroke-width="3"/>
+    <text x="640" y="300" fill="#fed7aa" font-size="22" font-weight="700" text-anchor="middle">ingest_bronze</text>
+    <text x="640" y="332" fill="#fdba74" font-size="14" text-anchor="middle">land one day in Bronze</text>
+    <text x="640" y="354" fill="#fdba74" font-size="13" text-anchor="middle">(idempotent, Ch 6)</text>
 
-    <rect x="670" y="250" width="245" height="120" rx="16" fill="#1e293b" stroke="#cbd5e1" stroke-width="3"/>
-    <text x="792" y="300" fill="#f1f5f9" font-size="22" font-weight="700" text-anchor="middle">build_silver</text>
-    <text x="792" y="332" fill="#e2e8f0" font-size="14" text-anchor="middle">clean &amp; conform</text>
-    <text x="792" y="354" fill="#e2e8f0" font-size="13" text-anchor="middle">(SDP refresh, Ch 7)</text>
-
-    <rect x="975" y="250" width="245" height="120" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
-    <text x="1097" y="300" fill="#fef3c7" font-size="22" font-weight="700" text-anchor="middle">build_gold</text>
-    <text x="1097" y="332" fill="#fde68a" font-size="14" text-anchor="middle">aggregate</text>
-    <text x="1097" y="354" fill="#fde68a" font-size="13" text-anchor="middle">(SDP refresh, Ch 7)</text>
+    <rect x="890" y="250" width="290" height="120" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
+    <text x="1035" y="300" fill="#fef3c7" font-size="22" font-weight="700" text-anchor="middle">build_silver_gold</text>
+    <text x="1035" y="332" fill="#fde68a" font-size="14" text-anchor="middle">one SDP run: Silver, then Gold</text>
+    <text x="1035" y="354" fill="#fde68a" font-size="13" text-anchor="middle">(SDP orders them, Ch 7)</text>
   </g>
 
   <!-- dependency edges -->
   <g stroke="#fb923c" stroke-width="3" fill="none" marker-end="url(#a9)">
-    <path d="M305 310 L363 310"/>
-    <path d="M610 310 L668 310"/>
-    <path d="M915 310 L973 310"/>
+    <path d="M390 310 L493 310"/>
+    <path d="M785 310 L888 310"/>
   </g>
-  <text x="335" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
-  <text x="640" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
-  <text x="945" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
+  <text x="442" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
+  <text x="837" y="298" fill="#fb923c" font-size="13" text-anchor="middle">then</text>
 
   <!-- retry annotation -->
   <g>
-    <path d="M487 250 C 437 200 537 200 487 250" stroke="#4ade80" stroke-width="2" fill="none" marker-end="url(#a9g)"/>
-    <text x="487" y="195" fill="#4ade80" font-size="13" text-anchor="middle">↻ retry x2 on transient failure (safe: the ingest is idempotent)</text>
+    <path d="M640 250 C 590 200 690 200 640 250" stroke="#4ade80" stroke-width="2" fill="none" marker-end="url(#a9g)"/>
+    <text x="640" y="195" fill="#4ade80" font-size="13" text-anchor="middle">↻ retry x2 on transient failure (safe: the ingest is idempotent)</text>
   </g>
 
   <!-- failure semantics -->

@@ -77,9 +77,8 @@ ps:            ## health check
 ingest:        ## land one day's raw drop and ingest it into Bronze (make ingest DATE=2026-01-06)
 	python -m lakehouse.generate $(DATE)
 	python -m lakehouse.ingest $(DATE)
-pipeline:      ## rebuild Silver, then Gold (two refreshes; see Chapter 7)
-	cd pipelines/medallion && spark-pipelines run --remote $(SPARK_REMOTE) --refresh silver.orders
-	cd pipelines/medallion && spark-pipelines run --remote $(SPARK_REMOTE) --refresh gold.daily_revenue
+pipeline:      ## build Silver and Gold (SDP works out the order)
+	cd pipelines/medallion && spark-pipelines run --remote $(SPARK_REMOTE)
 test:          ## run the tests (needs the Connect server up)
 	pytest tests/ -q
 train:         ## train + log a model on Gold
@@ -89,7 +88,7 @@ train:         ## train + log a model on Gold
 Now the whole lifecycle is `make up`, `make ingest`, `make pipeline`, `make test`, `make train`, `make down`. Three details make it more than a list of aliases:
 
 - **Variables with defaults.** `make ingest` lands the default day; `make ingest DATE=2026-01-10` lands any other. `SPARK_REMOTE ?=` means "use the environment's value if there is one", so the same Makefile drives a remote cluster with `SPARK_REMOTE=sc://... make pipeline`, the Chapter 4 portability idea once more.
-- **The pipeline target encodes a lesson.** It refreshes Silver, then Gold, as two runs, because of the SDP limitation from Chapter 7. Whoever runs `make pipeline` (you next month, a teammate, an agent) gets the right order without having to know why.
+- **The pipeline target is one command because the pipeline is declarative.** `make pipeline` is a single `spark-pipelines run`; SDP works out that Gold reads Silver and builds them in order. Whoever runs it (you next month, a teammate, an agent) doesn't need to know the order, which is the point of declaring it. They do need the Chapter 7 rule if they edit a flow: on a read of another pipeline dataset, use `select`, not `withColumn`.
 - **`.PHONY`.** These targets are commands, not files, and `.PHONY` tells make never to skip them because a file with the same name happens to exist.
 
 That is the operator surface a teammate, or an agent (Chapter 12), drives, and it's the final touch that makes the project feel like a product instead of an exercise. (If `make` complains about a "missing separator", a recipe line was indented with spaces instead of a tab.)

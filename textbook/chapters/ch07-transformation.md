@@ -128,7 +128,9 @@ def silver_orders():
 def gold_daily_revenue():
     return (
         spark.read.table("iceberg.silver.orders")
-        .withColumn("order_date", F.to_date("created_at"))
+        # select, not withColumn, when reading another dataset of this pipeline
+        # (see "Run it again, and verify" below for why)
+        .select(F.to_date("created_at").alias("order_date"), "status", "amount")
         .groupBy("order_date", "status")
         .agg(F.sum("amount").alias("revenue"),
              F.count("*").alias("order_count"))
@@ -212,31 +214,43 @@ That empty result is the point of the medallion: Gold's revenue numbers are trus
 
 **What just happened?** You're reading a business-ready table: daily revenue and order counts by status. Trace its lineage in your head. These numbers came from Silver (clean, deduplicated orders), which came from Bronze (the raw landing), which came from the generator standing in for a source system. That full path, from raw event to business metric, is the entire data engineering flow in miniature, and you built it declaratively.
 
-### Run it again, and verify: a real limitation of OSS SDP 4.1 with Iceberg
+### Run it again, and verify: why Gold uses `select`, not `withColumn`
 
-Here is where a habit you've been building pays off: never assume a pipeline worked because it said `COMPLETED`. Run the exact same command a second time and re-check Gold:
+Here is where a habit you've been building pays off: never assume a pipeline worked because it said `COMPLETED`. Run the exact same command a second time and re-check the two tiers:
 
 ```bash
 spark-pipelines run --remote sc://localhost:15002
 ```
 
 ```python
-spark.table("iceberg.silver.orders").count()        # 945, fine
-spark.table("iceberg.gold.daily_revenue").count()   # 0 (!)
+spark.table("iceberg.silver.orders").count()                                     # 945
+spark.sql("SELECT sum(order_count) FROM iceberg.gold.daily_revenue").first()[0]  # 945
 ```
 
-The run reported success, Silver is correct, and Gold is empty. This is reproducible on Spark 4.1.0 and 4.1.3 with Iceberg tables, and it's worth understanding rather than memorizing. At the start of every run, SDP truncates each existing materialized view it's about to refresh, then runs the flows in dependency order. On the very first run, Silver didn't exist yet, so there was nothing to truncate and Gold read the freshly written rows. On later runs, Gold's read of Silver gets pinned to the snapshot SDP just created by truncating it (an empty snapshot), so Gold aggregates zero rows. You can see it in the Connect server's log (`docker compose logs spark-connect | grep SnapshotScan`): Gold scans Silver at the snapshot whose operation is `delete`, before Silver's new rows are committed. Iceberg is behaving correctly (a read sees one consistent snapshot); the problem is which snapshot SDP lets the downstream flow see.
+Gold still accounts for every Silver row, on this run and every run after it. That only holds because of the comment in `gold_daily_revenue`. Change its `.select(...)` line to the more common-looking
 
-The reliable pattern until this is fixed upstream is to refresh in dependency order yourself, one dataset per run, so each refresh reads its input only after that input has been committed:
-
-```bash
-spark-pipelines run --remote sc://localhost:15002 --refresh silver.orders
-spark-pipelines run --remote sc://localhost:15002 --refresh gold.daily_revenue
+```python
+        .withColumn("order_date", F.to_date("created_at"))
 ```
 
-Run that pair as often as you like and Gold stays correct (`gold.daily_revenue` sums to Silver's row count every time). You still get everything else SDP provides (declared datasets, inferred schemas, the dependency graph, materialization), you just sequence the two refreshes. That's also exactly how Chapter 9's Airflow DAG will run them, as two tasks, `build_silver` then `build_gold`.
+and run the pipeline twice more. The first of those runs is fine. On the second, the run still reports `COMPLETED` and Silver still has 945 rows, but Gold is empty. The run log shows why: instead of Silver finishing before Gold starts, both flows are queued and start together:
 
-One related property is worth knowing even once this is fixed. A materialized-view refresh here is two commits, a `delete` (the truncate) and then an `append`, not the single atomic commit you saw for `INSERT` and `DELETE` in Chapter 5. A reader that queries Gold in the moment between them sees an empty table. List Silver's snapshots with the helper from Chapter 5 (`print_snapshots("silver", "orders")`) and you'll see the `delete`/`append` pairs, one per refresh. For a local course that's harmless; for a dashboard refreshing during business hours, it's the kind of detail you'd want to know before production.
+```
+Flow iceberg.gold.daily_revenue is QUEUED.
+Flow iceberg.silver.orders is QUEUED.
+Flow iceberg.silver.orders is RUNNING.
+Flow iceberg.gold.daily_revenue is RUNNING.
+```
+
+SDP no longer knows that Gold depends on Silver. Here is the mechanism, because it's a genuine gap in Spark 4.1 rather than anything you did wrong. SDP learns a flow's dependencies by finding the reads of other pipeline datasets in the flow's (unresolved) query plan. Over Spark Connect, though, `withColumn` is sent to the server as its own plan node, and the Connect server tries to analyze it eagerly the moment it arrives, which means looking `iceberg.silver.orders` up in the catalog. On the very first run Silver doesn't exist yet, the eager analysis fails, the server keeps the unresolved plan, and SDP finds the dependency. From the second run on Silver does exist, the read gets resolved straight to the catalog table, and SDP sees an ordinary external table instead of its own dataset. It then refreshes Gold alongside Silver, at the moment Silver has just been truncated for its own refresh (every run truncates the materialized views it rebuilds first), so Gold aggregates an empty table.
+
+The practical rule, until Spark fixes this upstream:
+
+- **When a flow reads another dataset of the same pipeline, shape its columns with `select` (or `selectExpr`), `filter`, `groupBy`/`agg`, or SQL, not `withColumn`, `withColumnRenamed`, or `drop`.** Those last three go through the eager-analysis path. `drop`, which has no fallback at all, fails even the first run with `TABLE_OR_VIEW_NOT_FOUND`.
+- **Reads of tables outside the pipeline are unaffected.** That's why `clean_orders` can use `withColumn` freely: Silver reads Bronze, which this pipeline doesn't define, so there's no dependency to lose.
+- **Verify across runs, not just once.** A single green run proves very little here. The check above (Gold's counts summing to Silver's rows) is cheap, and it's exactly the kind of assertion worth adding to `tests/` or to the end of a scheduled run.
+
+One related property is worth knowing. A materialized-view refresh here is two commits, a `delete` (the truncate) and then an `append`, not the single atomic commit you saw for `INSERT` and `DELETE` in Chapter 5. A reader that queries Gold in the moment between them sees an empty table. List Silver's snapshots with the helper from Chapter 5 (`print_snapshots("silver", "orders")`) and you'll see the `delete`/`append` pairs, one per refresh. For a local course that's harmless; for a dashboard refreshing during business hours, it's the kind of detail you'd want to know before production.
 
 ## Data quality in OSS Spark Declarative Pipelines
 
@@ -318,7 +332,7 @@ The tests need the Connect server up (they use `get_spark()`), so they're really
 - **`ModuleNotFoundError: pyspark.pipelines` or `spark-pipelines: command not found`.** The pipelines extra isn't installed in the environment you're running from (activate your project's venv), or you're on a Spark older than 4.1. Run `pip install 'pyspark[pipelines]==4.1.0'`.
 - **`spark-pipelines` fails to launch with a Java error.** The CLI starts a JVM under the hood (via `spark-class`), so it needs a JDK (Java 17+) on your host. See Step 1.
 - **`SCHEMA_NOT_FOUND` for `iceberg`.`default` or `iceberg`.`silver`.** The spec is missing `database: silver`, or the `silver`/`gold` namespaces don't exist yet. SDP won't create schemas; create them with `CREATE NAMESPACE IF NOT EXISTS`.
-- **Gold is empty after a run that said `COMPLETED`.** You ran a full `spark-pipelines run` on a pipeline whose tables already existed. Refresh in order instead: `--refresh silver.orders`, then `--refresh gold.daily_revenue` (see "Run it again, and verify").
+- **Gold is empty after a run that said `COMPLETED`.** Gold uses `withColumn` (or `withColumnRenamed`) on its read of Silver, so from the second run on SDP no longer knows Gold depends on Silver and builds Gold from a just-truncated table. Shape the columns with `select` instead (see "Run it again, and verify"), then re-run and check that Gold's `order_count` sums to Silver's row count.
 - **`Cannot change column type: amount: double -> decimal(10, 2)`.** You changed a column's type in a dataset that already exists. A refresh, even `--full-refresh-all`, keeps the table and only resets its data, and Iceberg can't change a double into a decimal in place. Drop the table (`DROP TABLE iceberg.silver.orders PURGE`, and Gold too) and run again. Iceberg can widen some types in place (`int` to `bigint`, `float` to `double`), but not this one.
 - **Connect-style error during run.** SDP runs on Spark Connect, so failures surface as Connect errors; read the last line, as in Chapter 4. Confirm `--remote sc://localhost:15002` points at your running Connect server.
 - **Tables land in the wrong catalog or schema.** Check `catalog:` in `spark-pipeline.yml` and the schema-qualified `name=` on each dataset (`silver.orders`, `gold.daily_revenue`).
@@ -327,15 +341,15 @@ The tests need the Connect server up (they use `get_spark()`), so they're really
 
 - `spark-pipelines init` scaffolded `pipelines/medallion/`, and your spec sets `catalog: iceberg` and `database: silver`.
 - `medallion.py` declares `silver.orders` and `gold.daily_revenue`, with dependencies expressed by `spark.read.table(...)`.
-- The first `spark-pipelines run --remote sc://localhost:15002` materialized both datasets in the correct order without you sequencing them.
-- You re-ran it, caught the empty Gold, and switched to refreshing `silver.orders` then `gold.daily_revenue`.
+- `spark-pipelines run --remote sc://localhost:15002` materialized both datasets in the correct order without you sequencing them.
+- You re-ran it and confirmed Gold still sums to Silver's row count, and you can explain why Gold uses `select` rather than `withColumn` on its read of Silver.
 - Silver's `.filter(...)` calls dropped invalid rows.
 - Querying `iceberg.gold.daily_revenue` returns aggregated, business-ready results with an exact `decimal` revenue, and `pytest tests/ -q` reports `2 passed`.
 - You can explain the difference between imperative and declarative pipelines.
 
 ## Try it yourself
 
-1. **Add a Gold table.** Declare a second Gold materialized view, say revenue by `customer_id`, that also reads Silver. Refresh it on its own with `--refresh gold.revenue_by_customer` (after Silver) and confirm SDP builds it from your declaration alone. That's the "clean once, aggregate many ways" payoff. What should a guest checkout (null `customer_id`) count as here?
+1. **Add a Gold table.** Declare a second Gold materialized view, say revenue by `customer_id`, that also reads Silver. Re-run the pipeline with the same command and confirm SDP builds it from your declaration alone, after Silver, without you touching the run command. Use `select`/`agg` on the Silver read, per the rule above. That's the "clean once, aggregate many ways" payoff. What should a guest checkout (null `customer_id`) count as here?
 2. **Tighten a filter.** Add a quality filter to Silver (for example, `status IN ('placed', 'shipped', 'cancelled')`) and see how many rows it drops. Then relax it and compare.
 3. **Make it fail loud.** In the Silver function, after the filters, check a must-hold condition (for example, that the row count is non-zero) and `raise` if it's violated. Introduce a scenario that trips it and watch the run stop. Reflect on when that behavior is what you want.
 4. **Trace the lineage.** Pick one number in the Gold output and, in words, trace it back through Silver to Bronze to the generator. Being able to explain "where did this number come from?" is a core data-engineering skill.
@@ -353,7 +367,7 @@ The tests need the Connect server up (they use `get_spark()`), so they're really
 - Spark Declarative Pipelines let you declare datasets and dependencies; the engine derives the graph and refresh, built on Spark Connect.
 - Data quality lives in the dataset definition as ordinary filters (drop) or raised errors (fail). The named-expectations API is a Databricks feature, not part of OSS.
 - Cleaning logic lives in a reusable `lakehouse/quality.py` function that Silver calls and `tests/` verifies, so the rules protecting Gold are themselves tested. Money is conformed to an exact `DECIMAL`.
-- "It said COMPLETED" is not verification. In OSS SDP 4.1 with Iceberg, refresh Silver and Gold as separate runs, in order, and check the counts.
+- "It said COMPLETED" is not verification: re-run and check the counts. In Spark 4.1, a flow that reads another pipeline dataset should shape columns with `select`, not `withColumn`, or SDP can lose the dependency.
 - **Next, Chapter 8, Streaming:** feed the same Silver continuously from Kafka with a streaming table, and contrast streaming with the batch pipeline you just built.
 
 ![Progress: Transformation complete, Streaming next](../figures/ch07/fig-7.4-progress-transform-done.svg)

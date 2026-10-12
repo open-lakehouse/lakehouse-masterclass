@@ -65,7 +65,7 @@ When your documentation is consistent and complete enough that an agent can foll
 - Health:     `make ps` (or `docker compose ps --format json` for machine-readable state)
 - Lifecycle:  `make up` / `make down`
 - Bronze:     `make ingest DATE=YYYY-MM-DD` (idempotent: re-running a date replaces only that date)
-- Silver+Gold: `make pipeline` (refreshes silver.orders, then gold.daily_revenue)
+- Silver+Gold: `make pipeline` (one SDP run; it builds Silver, then Gold)
 - Tests:      `make test`        Train: `make train`
 - Query:      SQL over Spark Connect (`from lakehouse.session import get_spark`);
               tables are iceberg.bronze.orders_raw, iceberg.silver.orders, iceberg.gold.daily_revenue
@@ -93,7 +93,7 @@ You: Bring up the lakehouse stack, run the batch medallion pipeline,
 agent -> make ps                       # what's running? (reads state before acting)
 agent -> make up                       # bring the stack up
 agent -> make ps                       # confirm every service is Up before continuing
-agent -> make pipeline                 # refresh Silver, then Gold
+agent -> make pipeline                 # one SDP run: Silver, then Gold
 agent -> (SQL over sc://localhost:15002) SELECT order_date, status, revenue, order_count
          FROM iceberg.gold.daily_revenue ORDER BY order_date, status
 agent -> "Here's daily revenue by status: ..."   # reports back

@@ -60,24 +60,40 @@ Also added and runtime-verified during this pass:
      (`AWS_REQUEST_CHECKSUM_CALCULATION` / `AWS_RESPONSE_CHECKSUM_VALIDATION`) are
      not needed; they were only required against 3.80.
 
-3. **Upstream bug candidates** (reproduced; workarounds are in the chapters):
+3. **Upstream bugs** (root-caused; fixes drafted locally, not yet filed or pushed):
    - **Unity Catalog 0.7: metadata tables fail.** `loadTable` for an identifier like
      `bronze.orders.snapshots` returns 404 `NoSuchNamespaceException` ("Schema not
-     found: iceberg.bronze.orders"). The Iceberg REST spec defines LoadTable's 404 as
+     found: iceberg.bronze.orders"). The Iceberg REST spec answers table routes with
      `NoSuchTableException`, and Iceberg's client only falls back to metadata-table
      resolution on that type, so `.snapshots`, `.files`, `.history` are unusable from
-     Spark. Workarounds in the course: `SHOW TBLPROPERTIES ... ('current-snapshot-id')`,
-     the `_file` metadata column, and `lakehouse/catalog.py` (snapshot list via the REST
-     loadTable call; worth keeping as a teaching tool even after a fix). When fixed,
-     restore the metadata-table queries in Chapters 5 and 11.
-   - **OSS SDP 4.1 (also 4.1.3) on Iceberg: MV reading an MV in one run is empty.**
-     At run start SDP truncates every materialized view; the downstream flow's scan of
-     the upstream table is planned against the truncated snapshot, so Gold reads an
-     empty Silver and commits zero rows (only the first run after a drop works). The
-     Spark log shows Gold scanning Silver's `delete` snapshot. Workaround in the course:
-     refresh in two runs (`--refresh silver.orders`, then `--refresh gold.daily_revenue`)
-     in the Makefile and as two DAG tasks. When fixed, restore the single
-     `spark-pipelines run` in Chapters 7, 9, 12, 13.
+     Spark. With authorization on it fails earlier, while resolving securables.
+     Fix: the Iceberg routes' exception handler reports SCHEMA_NOT_FOUND as
+     TABLE_NOT_FOUND on table-scoped routes. Tests pass (58 Iceberg/handler tests,
+     including a new auth-on case), and a patched image made `.snapshots`, `.files`
+     and `.history` work from Spark end to end. Drafts (issue, PR body, push steps):
+     `~/spark-contributor/drafts/OPP-2026-10-12-UC-IRC-METADATA-TABLES`; branch
+     `fix/irc-loadtable-missing-namespace` in `~/repos/unitycatalog-irc-fix` (needs a
+     DCO sign-off before pushing). Workarounds in the course meanwhile:
+     `SHOW TBLPROPERTIES ... ('current-snapshot-id')`, the `_file` column, and
+     `lakehouse/catalog.py` (keep that one as a teaching tool). When a UC release
+     carries the fix, restore the metadata-table queries in Chapters 5 and 11.
+   - **Spark 4.1 (also 4.1.3, same code on master): SDP over Spark Connect loses a
+     flow's dependency when the flow uses `withColumn` / `withColumnRenamed` on a read
+     of another pipeline dataset that already exists.** The Connect planner analyzes
+     those nodes eagerly when the pipeline registers the flow, resolving the read to
+     the catalog table, so SDP treats it as external: on every run after the first,
+     both flows start together and the downstream one reads a just-truncated table
+     (Gold empty, run "COMPLETED"). Reproduces without Iceberg (session catalog,
+     Parquet). `drop`, `na.fill` and other eager transforms fail outright. Fix drafted
+     in `~/repos/spark-sdp-eager` (branch `sdp-connect-eager-analysis`): pipeline flow
+     plans are converted with eager analysis deferred, plus a PythonPipelineSuite test that
+     fails without the fix; 319 tests in the pipelines, planner and session suites pass.
+     JIRA draft and standalone repro: `~/spark-contributor/drafts/OPP-2026-10-12-SDP-CONNECT-EAGER-ANALYSIS`.
+     Course workaround (not a hack, a real rule until the fix ships): Gold shapes its
+     columns with `select`, not `withColumn`, so the single `spark-pipelines run` is
+     correct on every run (verified across repeated runs and in Airflow). Chapter 7
+     teaches the rule and the mechanism. When a Spark release carries the fix, soften
+     the rule in Chapter 7 to a note about older versions.
    - **MLflow image** `ghcr.io/mlflow/mlflow:v3.1.0` ships without `boto3`; the course
      builds a two-line image. Recheck on the next MLflow pin.
 

@@ -29,13 +29,13 @@ It's worth dwelling on why cron isn't enough, because "just use cron" is a tempt
 
 > **DAG** *(canonical term)*: a Directed Acyclic Graph, the pipeline's tasks and the dependency edges between them. "Directed" and "acyclic" mean work flows one way and never loops.
 
-In Airflow you express your pipeline as a DAG: each step is a task, and you declare which tasks must finish before others start. Airflow figures out the order, runs independent tasks in parallel, and stops a downstream task if its upstream failed. Our medallion is a natural DAG: `land_raw` then `ingest_bronze` then `build_silver` then `build_gold`.
+In Airflow you express your pipeline as a DAG: each step is a task, and you declare which tasks must finish before others start. Airflow figures out the order, runs independent tasks in parallel, and stops a downstream task if its upstream failed. Our medallion is a natural DAG: `land_raw` then `ingest_bronze` then `build_silver_gold`.
 
 Let's unpack the jargon, because "Directed Acyclic Graph" sounds more intimidating than it is. A graph is just boxes (tasks) connected by arrows (dependencies). Directed means the arrows point one way: Bronze comes before Silver, not the reverse. Acyclic means no loops: you can't have Bronze depend on Gold which depends on Bronze, because then nothing could ever start. That's the whole concept: a set of tasks with one-way "must happen before" arrows and no circular waiting. Any pipeline you can draw as boxes-and-arrows-without-loops is a DAG, and Airflow's job is to run it correctly.
 
 ![The medallion as an Airflow DAG](../figures/ch09/fig-9.2-dag.svg)
 
-**Figure 9.2**. The medallion DAG: `ingest_bronze` to `build_silver` to `build_gold`, scheduled daily, each task with retries; a failed task blocks its downstream.
+**Figure 9.2**. The medallion DAG: `land_raw` to `ingest_bronze` to `build_silver_gold`, scheduled daily, each task with retries; a failed task blocks its downstream.
 
 ### Under the hood: the DAG triggers work, it isn't the work
 
@@ -223,10 +223,12 @@ def ingest_bronze(**ctx):
     ingest_orders(run_day(ctx))
 
 
-def refresh(dataset: str):
-    """Refresh one dataset of the Chapter 7 SDP project on the in-network Connect server."""
+def build_silver_gold(**_):
+    # Run the Chapter 7 SDP project against the in-network Connect server. SDP works out
+    # that Gold reads Silver and builds them in that order; Airflow only sequences
+    # "ingest, then transform".
     subprocess.run(
-        ["spark-pipelines", "run", "--remote", "sc://spark-connect:15002", "--refresh", dataset],
+        ["spark-pipelines", "run", "--remote", "sc://spark-connect:15002"],
         cwd="/opt/lakehouse/pipelines/medallion", check=True,
     )
 
@@ -241,21 +243,18 @@ with DAG(
 ) as dag:
     t_raw = PythonOperator(task_id="land_raw", python_callable=land_raw)
     t_bronze = PythonOperator(task_id="ingest_bronze", python_callable=ingest_bronze)
-    t_silver = PythonOperator(task_id="build_silver", python_callable=refresh,
-                              op_kwargs={"dataset": "silver.orders"})
-    t_gold = PythonOperator(task_id="build_gold", python_callable=refresh,
-                            op_kwargs={"dataset": "gold.daily_revenue"})
+    t_silver_gold = PythonOperator(task_id="build_silver_gold", python_callable=build_silver_gold)
 
-    t_raw >> t_bronze >> t_silver >> t_gold      # the dependency edges = the DAG
+    t_raw >> t_bronze >> t_silver_gold      # the dependency edges = the DAG
 ```
 
-**What just happened?** The last line is the heart of it: `t_raw >> t_bronze >> t_silver >> t_gold` literally draws the arrows of the DAG. Several details are worth slowing down for:
+**What just happened?** The last line is the heart of it: `t_raw >> t_bronze >> t_silver_gold` literally draws the arrows of the DAG. Several details are worth slowing down for:
 
 - **The imports are Airflow 3's.** `DAG` comes from `airflow.sdk` and `PythonOperator` from the standard provider. Older tutorials import `airflow.operators.python`; that path belongs to Airflow 2.
 - **`run_day()` answers "which day is this run for?"** Scheduled and backfill runs carry a *logical date*, the interval they cover, and that date is what makes retries and backfills correct: the run for January 3 always lands January 3, whenever it actually executes. Airflow 3 changed one thing here: a run you trigger by hand has *no* logical date unless you give it one, so code that reaches for `ctx["ds"]` (or takes `ds` as a parameter) fails on manual runs with `missing 1 required positional argument: 'ds'`. `run_day()` uses the logical date when there is one and falls back to when the run was requested.
 - **`land_raw` stands in for the source.** In production the day's export would simply arrive (or a sensor task would wait for it). Here the generator plays that role, so a backfill of a past day has raw data to ingest. Because the generator is seeded by date, the January 3 drop is identical every time it is produced.
 - **The tasks are thin.** `ingest_bronze` calls the exact `ingest_orders` you wrote in Chapter 6, not a copy. There is one definition of "land Bronze" in the whole system; fix a bug in `lakehouse/ingest.py` and both your manual runs and the scheduled runs get the fix.
-- **Silver and Gold are two tasks.** Chapter 7 explains why: with open-source SDP 4.1 on Iceberg, refreshing a materialized view and another one that reads it in the same run leaves the downstream one empty, so Silver and Gold are refreshed as separate steps. Sequencing steps is exactly the orchestrator's job, and splitting them gives you per-step retries and logs for free.
+- **Silver and Gold are one task.** `build_silver_gold` runs the whole Chapter 7 SDP project, and SDP works out that Gold reads Silver and builds them in that order. Airflow only has to sequence "ingest, then transform". This is the conductor-and-musician split again: the orchestrator orders the steps it owns and leaves the ordering inside a declarative pipeline to the pipeline.
 - **`catchup=False` and `max_active_runs=1`.** Without `catchup=False`, deploying a DAG whose `start_date` is in the past makes Airflow immediately try to run every missed day, a classic surprise that floods a new pipeline with runs. `max_active_runs=1` keeps two scheduled runs from refreshing Silver and Gold at the same time.
 
 Within a few seconds of saving the file, the DAG processor picks it up. Because the Compose file sets `DAGS_ARE_PAUSED_AT_CREATION` to `false`, the DAG starts unpaused, and with `catchup=False` Airflow schedules exactly one run, for the most recent daily interval. That first run is expected; it's the scheduler doing its job. Check that the file parsed cleanly:
@@ -274,19 +273,18 @@ docker compose exec airflow-scheduler \
     airflow dags trigger lakehouse_medallion_pipeline --logical-date 2026-01-08
 ```
 
-Expected: `land_raw` runs first, then `ingest_bronze`, then `build_silver`, then `build_gold`, each starting only after the one before it succeeds. In the UI's graph view the tasks turn green in sequence. You can confirm the same thing without the UI, which is how you'd check it in a script or an alert (in Airflow 3 the DAG id is a positional argument):
+Expected: `land_raw` runs first, then `ingest_bronze`, then `build_silver_gold`, each starting only after the one before it succeeds. In the UI's graph view the tasks turn green in sequence. You can confirm the same thing without the UI, which is how you'd check it in a script or an alert (in Airflow 3 the DAG id is a positional argument):
 
 ```bash
 docker compose exec airflow-scheduler airflow dags list-runs lakehouse_medallion_pipeline
 ```
 
-A `state` of `success` for the run means all four tasks finished in order; `failed` or `running` tells you to open that run's task logs in the UI. The task timeline from a verification run looks like this, each task starting seconds after the previous one finished:
+A `state` of `success` for the run means all three tasks finished in order; `failed` or `running` tells you to open that run's task logs in the UI. The task list for the run, in the order the tasks ran, from a verification run:
 
 ```
-land_raw       success  12:22:35
-ingest_bronze  success  12:22:39
-build_silver   success  12:22:42
-build_gold     success  12:22:48
+land_raw           success
+ingest_bronze      success
+build_silver_gold  success
 ```
 
 Then confirm the data, not just the green boxes:
@@ -300,7 +298,7 @@ spark.sql("SELECT order_date, sum(order_count) AS orders FROM iceberg.gold.daily
 
 Expected: a row for `2026-01-08` has appeared alongside the days you loaded by hand.
 
-**What just happened?** You watched dependency enforcement in action. Gold did not refresh until Silver had, and Silver did not refresh until the ingest succeeded; if the ingest had failed, nothing downstream would have run, sparing you a pile of wrong data. That "don't run downstream if upstream failed" behavior is exactly what cron can't do and what makes an orchestrated pipeline trustworthy.
+**What just happened?** You watched dependency enforcement in action. The transform did not start until the ingest succeeded (and inside it, SDP built Silver before Gold); if the ingest had failed, nothing downstream would have run, sparing you a pile of wrong data. That "don't run downstream if upstream failed" behavior is exactly what cron can't do and what makes an orchestrated pipeline trustworthy.
 
 ## Retries and backfills: the production payoff
 
@@ -320,7 +318,7 @@ docker compose exec airflow-scheduler \
 
 Expected: one run per day, `backfill__2026-01-01...` through `backfill__2026-01-07...`, executing one after another. Each lands its own day's raw drop, overwrites exactly that day's Bronze partition, and refreshes Silver and Gold. Re-running a range you already backfilled needs `--reprocess-behavior completed`, which tells Airflow to redo days that already succeeded; because every task is idempotent, the result is identical.
 
-**Don't drop `--max-active-runs 1`.** It looks like a tuning knob; it is a correctness setting. A backfill has its own concurrency limit, separate from the DAG's `max_active_runs`, and by default it starts many days at once. When that happens here, several runs refresh Silver and Gold simultaneously, each one resetting the table and inserting into it, and the writes interleave. In verification, an unbounded seven-day backfill left Silver at 30744 rows (four times the real count, because overlapping inserts stacked up) and Gold empty, with every task green. The orchestrator reported success on corrupted data. Running one day at a time removes the overlap, and the counts come out right. The general lesson outlives this pipeline: parallel runs are only safe for tasks that don't write the same table.
+**Don't drop `--max-active-runs 1`.** It looks like a tuning knob; it is a correctness setting. A backfill has its own concurrency limit, separate from the DAG's `max_active_runs`, and by default it starts many days at once. When that happens here, several runs refresh Silver and Gold simultaneously, each one resetting the table and inserting into it, and the writes interleave. In verification, an unbounded seven-day backfill left Silver at 30744 rows, four times the real count, because overlapping inserts stacked up, with every task green. The orchestrator reported success on corrupted data. Running one day at a time removes the overlap, and the counts come out right. The general lesson outlives this pipeline: parallel runs are only safe for tasks that don't write the same table.
 
 **What just happened?** This is where several earlier chapters' decisions pay a dividend at once. You needed a week of history. Because each day's raw drop is addressable by date and the ingest overwrites only that day's partition (Chapter 6), each run touched exactly its own slice of Bronze. Because each run is idempotent, re-running a day overwrites cleanly instead of duplicating. And because Airflow ties runs to dates, "redo January 1 to 7" is one command. A backfill that would have been a terrifying manual data-surgery operation in a fragile system is routine here. (The streaming job from Chapter 8 can keep running throughout: its rows live in `_source = 'orders-stream'` partitions, which a batch overwrite never touches.)
 
@@ -335,21 +333,21 @@ Expected: one run per day, `backfill__2026-01-01...` through `backfill__2026-01-
 - **`airflow dags backfill`: invalid choice.** That is the Airflow 2 command. Airflow 3 uses `airflow backfill create --dag-id ... --from-date ... --to-date ...`.
 - **Every task is green but Silver has several times too many rows and Gold is empty.** Runs overlapped. A backfill without `--max-active-runs 1` refreshes Silver and Gold from several runs at once. Re-run the range with `--max-active-runs 1 --reprocess-behavior completed`.
 - **A manually triggered run fails with `missing 1 required positional argument: 'ds'` or `KeyError: 'ds'`.** In Airflow 3 a manual run has no logical date. Use the `run_day()` helper from the DAG above, or trigger with `--logical-date YYYY-MM-DD`.
-- **`build_silver` fails with `java: not found` or `JAVA_HOME is not set`.** The scheduler is running the stock Airflow image. `spark-pipelines` needs the JDK baked into `docker/airflow/Dockerfile`; rebuild with `docker compose up -d --build airflow-scheduler`.
+- **`build_silver_gold` fails with `java: not found` or `JAVA_HOME is not set`.** The scheduler is running the stock Airflow image. `spark-pipelines` needs the JDK baked into `docker/airflow/Dockerfile`; rebuild with `docker compose up -d --build airflow-scheduler`.
 - **`ModuleNotFoundError: No module named 'lakehouse'` in a task.** The mounts or `PYTHONPATH` are missing from the service. Every Airflow service inherits them from `x-airflow-common`; check that the service has `<<: *airflow-common`.
 - **`airflow-init` exits non-zero.** Usually the database password in `.env` changed after `airflow-db` first initialized its volume. Postgres only reads `POSTGRES_PASSWORD` the first time; put the original back (or, if the Airflow history is disposable, remove just the `airflow-db` volume).
 
 ## Checkpoint
 
 - `docker compose ps` shows the Airflow services healthy; the UI opens on 8085.
-- The `lakehouse_medallion_pipeline` DAG shows `land_raw` then `ingest_bronze` then `build_silver` then `build_gold`, with no import errors.
+- The `lakehouse_medallion_pipeline` DAG shows `land_raw` then `ingest_bronze` then `build_silver_gold`, with no import errors.
 - A triggered run turns the tasks green in dependency order.
 - `retries` are configured, and you ran a backfill over a date range with `--max-active-runs 1`, then confirmed every backfilled day appears in Gold.
 - You can explain why cron is insufficient and what "DAG" means.
 
 ## Try it yourself
 
-1. **Force a failure.** Make `build_silver` raise an error on purpose (for example, point `refresh` at a dataset name that doesn't exist), trigger the DAG, and confirm the run stops there. Then fix it and re-run. That's dependency enforcement protecting you.
+1. **Force a failure.** Make `build_silver_gold` raise an error on purpose (for example, point its `cwd` at a directory that doesn't exist), trigger the DAG, and confirm the run stops there. Then fix it and re-run. That's dependency enforcement protecting you.
 2. **Watch retries.** Make a task fail intermittently (fail the first attempt), and watch Airflow retry it per your `retries` setting before giving up.
 3. **Backfill and verify.** Backfill a three-day range and confirm each day's Gold was re-derived. Check that running the backfill twice doesn't duplicate data (idempotency plus orchestration together).
 4. **Draw your own DAG.** Sketch the DAG you'd build if Gold had two independent downstream tables (say, a dashboard export and a model-training trigger). Which tasks could run in parallel?
