@@ -78,7 +78,14 @@ CONNECT = "sc://spark-connect:15002"       # in-network address, not localhost
 
 def ingest_bronze(**_):
     # the batch ingest from Chapter 6, pointed at the in-network Connect server
-    ...
+    from pyspark.sql import SparkSession, functions as F
+    spark = SparkSession.builder.remote(CONNECT).getOrCreate()
+    raw = spark.read.json("s3a://lakehouse/raw/orders/")
+    bronze = (raw
+        .withColumn("_ingested_at", F.current_timestamp())
+        .withColumn("_source",      F.lit("orders-generator"))
+        .withColumn("_ingest_date", F.to_date(F.current_timestamp())))
+    bronze.writeTo("iceberg.bronze.orders_raw").overwritePartitions()  # idempotent
 
 def build_silver_gold(**_):
     # run the SDP medallion from Chapter 7 against the Connect server
@@ -109,7 +116,16 @@ with DAG(
 docker compose exec airflow-scheduler airflow dags trigger lakehouse_medallion_pipeline
 ```
 
-Expected: `ingest_bronze` runs first; only when it succeeds does `build_silver_gold` start. In the UI's graph view each task turns green in sequence.
+Expected: `ingest_bronze` runs first; only when it succeeds does `build_silver_gold` start. In the UI's graph view each task turns green in sequence. You can confirm the same thing without the UI, which is how you'd check it in a script or an alert:
+
+```bash
+docker compose exec airflow-scheduler \
+    airflow dags list-runs -d lakehouse_medallion_pipeline
+# dag_id                        | run_id            | state   | ...
+# lakehouse_medallion_pipeline  | manual__2026-...  | success | ...
+```
+
+A `state` of `success` means both tasks ran in order and finished; `failed` or `running` tells you to open that run's task logs in the UI. (The exact column layout varies by Airflow version.)
 
 **What just happened?** You watched dependency enforcement in action. The transform did not start until the ingest succeeded; if the ingest had failed, the transform would never have run, sparing you a pile of wrong downstream data. That "don't run downstream if upstream failed" behavior is exactly what cron can't do and what makes an orchestrated pipeline trustworthy.
 
