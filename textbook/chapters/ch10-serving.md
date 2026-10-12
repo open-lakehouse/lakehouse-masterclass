@@ -52,12 +52,24 @@ The primary, always-available path is Spark itself reading through the catalog, 
 ```python
 from pyspark.sql import SparkSession
 spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
-spark.table("iceberg.gold.daily_revenue").orderBy("order_date").show()
+spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
+```
+
+Expected (your numbers depend on the generated data; note them down for the comparison):
+
+```
++----------+---------+--------+-----------+
+|order_date|   status| revenue|order_count|
++----------+---------+--------+-----------+
+|2026-01-05|cancelled| 4821.17|         63|
+|2026-01-05|   placed|41235.90|        548|
+|2026-01-05|  shipped| 9977.42|        131|
++----------+---------+--------+-----------+
 ```
 
 **What just happened?** Nothing new yet: this is Spark reading its own table through the catalog, establishing the "before" baseline. Note the exact rows it returns; you're about to get the identical rows from a completely different engine.
 
-**Step 2: read the same table from DuckDB,** pointing at the one Iceberg REST catalog. DuckDB is not required infrastructure; it's a lightweight second engine that proves interoperability. It runs on your host, so it uses the host-side catalog address `localhost:8081`.
+**Step 2: read the same table from DuckDB,** pointing at the one Iceberg REST catalog. DuckDB is not required infrastructure; it's a lightweight second engine that proves interoperability. It runs on your host, so it uses the host-side catalog address `localhost:8081`. Install it first (`pip install duckdb`, then `python3 -c "import duckdb; duckdb.sql('...')"`, or use the standalone `duckdb` CLI):
 
 ```sql
 -- In the DuckDB CLI or Python:
@@ -75,7 +87,21 @@ FROM uc.gold.daily_revenue
 ORDER BY order_date, status;
 ```
 
-Expected: DuckDB returns the same rows Spark returned in Step 1, read directly from the Iceberg files, through the shared catalog, with no export step. That identical result across two independent engines is the whole demonstration. (DuckDB's exact `ATTACH ... TYPE iceberg` syntax and any auth options track the DuckDB iceberg extension version; if the keywords differ, check the extension's current docs. The constant is the endpoint URL.)
+Expected, the same rows Spark gave you, from a different engine:
+
+```
+┌────────────┬───────────┬──────────┬─────────────┐
+│ order_date │  status   │ revenue  │ order_count │
+├────────────┼───────────┼──────────┼─────────────┤
+│ 2026-01-05 │ cancelled │  4821.17 │          63 │
+│ 2026-01-05 │ placed    │ 41235.90 │         548 │
+│ 2026-01-05 │ shipped   │  9977.42 │         131 │
+└────────────┴───────────┴──────────┴─────────────┘
+```
+
+Put this next to Step 1's output: same dates, same statuses, same revenue, same counts. Spark rendered its table with `+---+` borders and DuckDB with box-drawing characters, but the data is identical because both engines read the very same Parquet files through the very same catalog. That is the whole demonstration: not a copy that matches, the same bytes, read twice.
+
+DuckDB returns the same rows Spark returned in Step 1, read directly from the Iceberg files, through the shared catalog, with no export step. That identical result across two independent engines is the whole demonstration. (DuckDB's exact `ATTACH ... TYPE iceberg` syntax and any auth options track the DuckDB iceberg extension version; if the keywords differ, check the extension's current docs. The constant is the endpoint URL.)
 
 **What just happened?** Pause on this, because it's the intellectual climax of the course. DuckDB, a completely separate engine that knows nothing about Spark, just read the tables Spark wrote, and got identical results. There was no export, no copy, no "DuckDB format" conversion. DuckDB simply pointed at the same catalog URL, found the same Iceberg tables, and read the same underlying Parquet files. This is what "open" means in practice: your data isn't trapped in one engine's world. Every choice earlier in the course, Iceberg over a proprietary format, Unity Catalog OSS as a standard REST catalog, was made so this moment would work.
 
