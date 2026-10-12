@@ -1,53 +1,67 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
   <rect width="1280" height="720" fill="#0f172a"/>
   <text x="640" y="56" fill="#f8fafc" font-size="38" font-weight="700" text-anchor="middle">A home for everything you'll build</text>
-  <text x="640" y="94" fill="#94a3b8" font-size="20" text-anchor="middle">The project layout, and what each folder will hold</text>
+  <text x="640" y="94" fill="#94a3b8" font-size="20" text-anchor="middle">The project layout, and what each part will hold</text>
 
   <!-- tree column -->
-  <rect x="120" y="150" width="440" height="470" rx="14" fill="#0b1120" stroke="#334155" stroke-width="2"/>
+  <rect x="80" y="130" width="420" height="560" rx="14" fill="#0b1120" stroke="#334155" stroke-width="2"/>
+  <text x="110" y="176" fill="#f8fafc" font-size="22" font-family="monospace" font-weight="700">open-lakehouse/</text>
 
-  <text x="150" y="200" fill="#f8fafc" font-size="22" font-family="monospace" font-weight="700">open-lakehouse/</text>
-
-  <!-- tree lines -->
-  <text x="180" y="252" fill="#64748b" font-size="18" font-family="monospace">├──</text>
-  <text x="235" y="252" fill="#0ea5e9" font-size="19" font-family="monospace" font-weight="700">compose/</text>
-
-  <text x="180" y="316" fill="#64748b" font-size="18" font-family="monospace">├──</text>
-  <text x="235" y="316" fill="#22c55e" font-size="19" font-family="monospace" font-weight="700">config/</text>
-
-  <text x="180" y="380" fill="#64748b" font-size="18" font-family="monospace">├──</text>
-  <text x="235" y="380" fill="#a78bfa" font-size="19" font-family="monospace" font-weight="700">pipelines/</text>
-
-  <text x="180" y="444" fill="#64748b" font-size="18" font-family="monospace">├──</text>
-  <text x="235" y="444" fill="#f59e0b" font-size="19" font-family="monospace" font-weight="700">data/</text>
-
-  <text x="180" y="508" fill="#64748b" font-size="18" font-family="monospace">├──</text>
-  <text x="235" y="508" fill="#e2e8f0" font-size="19" font-family="monospace">.env</text>
-  <text x="420" y="508" fill="#f87171" font-size="14" font-family="monospace">gitignored</text>
-
-  <text x="180" y="572" fill="#64748b" font-size="18" font-family="monospace">└──</text>
-  <text x="235" y="572" fill="#e2e8f0" font-size="19" font-family="monospace">.gitignore</text>
+  <g font-family="monospace" font-size="19">
+    <text x="130" y="224" fill="#64748b">├──</text><text x="185" y="224" fill="#38bdf8" font-weight="700">lakehouse/</text>
+    <text x="130" y="268" fill="#64748b">├──</text><text x="185" y="268" fill="#4ade80" font-weight="700">config/</text>
+    <text x="130" y="312" fill="#64748b">├──</text><text x="185" y="312" fill="#c4b5fd" font-weight="700">pipelines/</text>
+    <text x="130" y="356" fill="#64748b">├──</text><text x="185" y="356" fill="#fb923c" font-weight="700">dags/</text>
+    <text x="130" y="400" fill="#64748b">├──</text><text x="185" y="400" fill="#f472b6" font-weight="700">ml/</text>
+    <text x="130" y="444" fill="#64748b">├──</text><text x="185" y="444" fill="#a3e635" font-weight="700">tests/</text>
+    <text x="130" y="488" fill="#64748b">├──</text><text x="185" y="488" fill="#fbbf24" font-weight="700">data/</text>
+    <text x="130" y="532" fill="#64748b">├──</text><text x="185" y="532" fill="#e2e8f0">pyproject.toml</text>
+    <text x="130" y="576" fill="#64748b">├──</text><text x="185" y="576" fill="#e2e8f0">.venv/</text>
+    <text x="350" y="576" fill="#f87171" font-size="14">gitignored</text>
+    <text x="130" y="620" fill="#64748b">├──</text><text x="185" y="620" fill="#e2e8f0">.env</text>
+    <text x="350" y="620" fill="#f87171" font-size="14">gitignored</text>
+    <text x="130" y="664" fill="#64748b">└──</text><text x="185" y="664" fill="#e2e8f0">.gitignore</text>
+  </g>
 
   <!-- annotations column -->
-  <rect x="620" y="222" width="540" height="60" rx="10" fill="#111c2e" stroke="#0ea5e9" stroke-width="1.5"/>
-  <text x="644" y="248" fill="#38bdf8" font-size="17" font-weight="700">compose/</text>
-  <text x="644" y="270" fill="#cbd5e1" font-size="15">service definitions: your infrastructure, written down</text>
+  <g font-size="15">
+    <rect x="540" y="200" width="660" height="40" rx="8" fill="#111c2e" stroke="#0ea5e9" stroke-width="1.5"/>
+    <text x="560" y="226" fill="#38bdf8" font-weight="700">lakehouse/</text>
+    <text x="680" y="226" fill="#cbd5e1">the shared Python package every layer imports (Ch 4 on)</text>
 
-  <rect x="620" y="286" width="540" height="60" rx="10" fill="#0d1f16" stroke="#22c55e" stroke-width="1.5"/>
-  <text x="644" y="312" fill="#4ade80" font-size="17" font-weight="700">config/</text>
-  <text x="644" y="334" fill="#cbd5e1" font-size="15">non-secret settings each service reads</text>
+    <rect x="540" y="244" width="660" height="40" rx="8" fill="#0d1f16" stroke="#22c55e" stroke-width="1.5"/>
+    <text x="560" y="270" fill="#4ade80" font-weight="700">config/</text>
+    <text x="680" y="270" fill="#cbd5e1">non-secret settings each service reads</text>
 
-  <rect x="620" y="350" width="540" height="60" rx="10" fill="#171429" stroke="#a78bfa" stroke-width="1.5"/>
-  <text x="644" y="376" fill="#c4b5fd" font-size="17" font-weight="700">pipelines/</text>
-  <text x="644" y="398" fill="#cbd5e1" font-size="15">spark-pipelines init scaffolds your project here</text>
+    <rect x="540" y="288" width="660" height="40" rx="8" fill="#171429" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="560" y="314" fill="#c4b5fd" font-weight="700">pipelines/</text>
+    <text x="680" y="314" fill="#cbd5e1">spark-pipelines init scaffolds the medallion here (Ch 7)</text>
 
-  <rect x="620" y="414" width="540" height="60" rx="10" fill="#1f1710" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="644" y="440" fill="#fbbf24" font-size="17" font-weight="700">data/</text>
-  <text x="644" y="462" fill="#cbd5e1" font-size="15">local scratch space, never committed</text>
+    <rect x="540" y="332" width="660" height="40" rx="8" fill="#22150b" stroke="#fb923c" stroke-width="1.5"/>
+    <text x="560" y="358" fill="#fb923c" font-weight="700">dags/</text>
+    <text x="680" y="358" fill="#cbd5e1">thin Airflow DAGs that import lakehouse/ (Ch 9)</text>
 
-  <rect x="620" y="478" width="540" height="94" rx="10" fill="#0f172a" stroke="#7f1d1d" stroke-width="1.5"/>
-  <text x="644" y="504" fill="#f87171" font-size="17" font-weight="700">.env + .gitignore</text>
-  <text x="644" y="528" fill="#cbd5e1" font-size="15">secrets live in .env, which .gitignore excludes.</text>
-  <text x="644" y="550" fill="#cbd5e1" font-size="15">The .gitignore is your very first commit, before</text>
-  <text x="644" y="568" fill="#cbd5e1" font-size="15">any real credential exists.</text>
+    <rect x="540" y="376" width="660" height="40" rx="8" fill="#22101a" stroke="#f472b6" stroke-width="1.5"/>
+    <text x="560" y="402" fill="#f472b6" font-weight="700">ml/</text>
+    <text x="680" y="402" fill="#cbd5e1">model training tracked in MLflow (Ch 11)</text>
+
+    <rect x="540" y="420" width="660" height="40" rx="8" fill="#141d0a" stroke="#a3e635" stroke-width="1.5"/>
+    <text x="560" y="446" fill="#a3e635" font-weight="700">tests/</text>
+    <text x="680" y="446" fill="#cbd5e1">real tests for the rules that protect your data (Ch 7)</text>
+
+    <rect x="540" y="464" width="660" height="40" rx="8" fill="#1f1710" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="560" y="490" fill="#fbbf24" font-weight="700">data/</text>
+    <text x="680" y="490" fill="#cbd5e1">local scratch space, never committed</text>
+
+    <rect x="540" y="508" width="660" height="40" rx="8" fill="#111827" stroke="#64748b" stroke-width="1.5"/>
+    <text x="560" y="534" fill="#e2e8f0" font-weight="700">pyproject.toml</text>
+    <text x="700" y="534" fill="#cbd5e1">makes lakehouse/ installable: pip install -e .</text>
+
+    <rect x="540" y="552" width="660" height="128" rx="8" fill="#0f172a" stroke="#7f1d1d" stroke-width="1.5"/>
+    <text x="560" y="580" fill="#f87171" font-weight="700">.venv/ + .env + .gitignore</text>
+    <text x="560" y="606" fill="#cbd5e1">.venv/ is your project's own Python; .env holds secrets.</text>
+    <text x="560" y="630" fill="#cbd5e1">.gitignore excludes both, and it is your very first commit,</text>
+    <text x="560" y="654" fill="#cbd5e1">before any real credential exists. docker-compose.yml joins</text>
+    <text x="560" y="676" fill="#cbd5e1">the root in Chapter 3, with the first service.</text>
+  </g>
 </svg>

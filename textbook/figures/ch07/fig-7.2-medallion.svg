@@ -37,7 +37,7 @@
   <text x="444" y="285" fill="#4ade80" font-size="13" text-anchor="middle">DQ gate</text>
   <text x="834" y="285" fill="#4ade80" font-size="13" text-anchor="middle">aggregate</text>
 
-  <text x="640" y="500" fill="#94a3b8" font-size="17" text-anchor="middle">Each tier reads the one below it. A logic change re-derives Silver/Gold from untouched Bronze —</text>
+  <text x="640" y="500" fill="#94a3b8" font-size="17" text-anchor="middle">Each tier reads the one below it. A logic change re-derives Silver/Gold from untouched Bronze;</text>
   <text x="640" y="528" fill="#94a3b8" font-size="17" text-anchor="middle">you never re-fetch the source.</text>
 
   <defs>

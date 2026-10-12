@@ -28,7 +28,7 @@
   <!-- seaweedfs container -->
   <rect x="150" y="340" width="420" height="230" rx="16" fill="#1e293b" stroke="#0ea5e9" stroke-width="2.5"/>
   <text x="360" y="382" fill="#f1f5f9" font-size="24" font-weight="700" text-anchor="middle">seaweedfs</text>
-  <text x="360" y="408" fill="#38bdf8" font-size="15" text-anchor="middle">object store container (image 3.80)</text>
+  <text x="360" y="408" fill="#38bdf8" font-size="15" text-anchor="middle">object store container (image 4.49)</text>
 
   <rect x="186" y="428" width="348" height="44" rx="8" fill="#0f172a" stroke="#0ea5e9" stroke-width="1.5"/>
   <text x="360" y="456" fill="#38bdf8" font-size="15" font-family="monospace" text-anchor="middle">S3 API on port 8333</text>

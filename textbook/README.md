@@ -1,4 +1,4 @@
-# Textbook — table of contents
+# Textbook: table of contents
 
 The book itself. Read the chapters in order; each builds one layer of the lakehouse
 on top of the previous one. Diagrams live in `figures/chNN/`.
@@ -25,7 +25,7 @@ on top of the previous one. Diagrams live in `figures/chNN/`.
 
 Organized per chapter under `figures/`:
 
-- `figures/ch01/` … `figures/ch13/` — the diagrams each chapter embeds.
-- `figures/_tools/gen_progress_maps.py` — stamps the recurring progress-map SVGs
+- `figures/ch01/` … `figures/ch13/` holds the diagrams each chapter embeds.
+- `figures/_tools/gen_progress_maps.py` stamps the recurring progress-map SVGs
   with the right layer highlighted; run it from anywhere, it writes into the
   correct `figures/chNN/` folders.

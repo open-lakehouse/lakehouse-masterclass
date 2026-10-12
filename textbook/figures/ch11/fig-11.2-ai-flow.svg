@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
   <rect width="1280" height="720" fill="#0f172a"/>
-  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">The lakehouse feeds AI — and MLflow tracks it</text>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">The lakehouse feeds AI, and MLflow tracks it</text>
 
   <!-- Gold -->
   <rect x="70" y="250" width="240" height="130" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
@@ -39,7 +39,7 @@
   <path d="M815 250 C 900 160 960 180 1030 200" stroke="#a78bfa" stroke-width="2.5" fill="none" marker-end="url(#a11p)"/>
   <text x="930" y="150" fill="#a78bfa" font-size="13" text-anchor="middle">log run + model</text>
 
-  <text x="640" y="520" fill="#94a3b8" font-size="17" text-anchor="middle">Logging the Gold snapshot id ties the model to the exact data that trained it —</text>
+  <text x="640" y="520" fill="#94a3b8" font-size="17" text-anchor="middle">Logging the Gold snapshot id ties the model to the exact data that trained it;</text>
   <text x="640" y="548" fill="#94a3b8" font-size="17" text-anchor="middle">data versioning (Iceberg) + model versioning (MLflow) = full reproducibility.</text>
 
   <defs>

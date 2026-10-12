@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
   <rect width="1280" height="720" fill="#0f172a"/>
-  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">Batch and streaming — two paths into one Bronze table</text>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">Batch and streaming: two paths into one Bronze table</text>
 
   <!-- BATCH path (top) -->
-  <text x="80" y="150" fill="#3b82f6" font-size="24" font-weight="700">BATCH — bounded, scheduled</text>
+  <text x="80" y="150" fill="#3b82f6" font-size="24" font-weight="700">BATCH: bounded, scheduled</text>
   <g>
     <rect x="80" y="175" width="150" height="64" rx="10" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
     <text x="155" y="213" fill="#e2e8f0" font-size="15" text-anchor="middle">raw files</text>
@@ -20,7 +20,7 @@
   <path d="M500 207 C 620 207 640 330 758 350" stroke="#3b82f6" stroke-width="2.5" fill="none" marker-end="url(#a8)"/>
 
   <!-- STREAMING path (bottom) -->
-  <text x="80" y="470" fill="#4ade80" font-size="24" font-weight="700">STREAMING — unbounded, continuous</text>
+  <text x="80" y="470" fill="#4ade80" font-size="24" font-weight="700">STREAMING: unbounded, continuous</text>
   <g>
     <rect x="80" y="495" width="180" height="64" rx="10" fill="#3a2410" stroke="#d97706" stroke-width="2.5"/>
     <text x="170" y="525" fill="#fed7aa" font-size="15" text-anchor="middle" font-weight="700">Kafka topic</text>

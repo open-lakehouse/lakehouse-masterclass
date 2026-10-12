@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
   <rect width="1280" height="720" fill="#0f172a"/>
-  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">One open catalog, many engines — no copies</text>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">One open catalog, many engines, no copies</text>
 
   <!-- engines row -->
   <g>
@@ -31,7 +31,7 @@
 
   <!-- catalog -->
   <rect x="360" y="305" width="560" height="110" rx="16" fill="#3f2d1a" stroke="#fbbf24" stroke-width="3"/>
-  <text x="640" y="345" fill="#fde68a" font-size="23" font-weight="700" text-anchor="middle">Unity Catalog OSS — Iceberg REST</text>
+  <text x="640" y="345" fill="#fde68a" font-size="23" font-weight="700" text-anchor="middle">Unity Catalog OSS: Iceberg REST</text>
   <text x="640" y="378" fill="#fbbf24" font-size="15" text-anchor="middle" font-family="monospace">/api/2.1/unity-catalog/iceberg</text>
   <text x="640" y="402" fill="#fef3c7" font-size="14" text-anchor="middle">one endpoint · one source of truth</text>
 

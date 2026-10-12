@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
   <rect width="1280" height="720" fill="#0f172a"/>
   <text x="640" y="64" fill="#f8fafc" font-size="40" font-weight="700" text-anchor="middle">Warehouse vs. Lake vs. Lakehouse</text>
-  <text x="640" y="100" fill="#94a3b8" font-size="20" text-anchor="middle">Two old options with fatal trade-offs — and the resolution</text>
+  <text x="640" y="100" fill="#94a3b8" font-size="20" text-anchor="middle">Two old options with fatal trade-offs, and the resolution</text>
 
   <!-- Panel 1: Data Warehouse -->
   <g>

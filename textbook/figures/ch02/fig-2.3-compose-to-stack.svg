@@ -22,20 +22,20 @@
   <!-- spark block -->
   <rect x="115" y="290" width="390" height="86" rx="8" fill="#111c2e" stroke="#3b82f6" stroke-width="1.5"/>
   <text x="135" y="318" fill="#60a5fa" font-size="16" font-family="monospace">spark:</text>
-  <text x="155" y="342" fill="#94a3b8" font-size="14" font-family="monospace">image: spark:4.1</text>
+  <text x="155" y="342" fill="#94a3b8" font-size="14" font-family="monospace">image: apache/spark:4.1.0</text>
   <text x="155" y="364" fill="#94a3b8" font-size="14" font-family="monospace">depends_on: [seaweedfs]</text>
 
   <!-- catalog block -->
   <rect x="115" y="388" width="390" height="86" rx="8" fill="#111c2e" stroke="#22c55e" stroke-width="1.5"/>
   <text x="135" y="416" fill="#4ade80" font-size="16" font-family="monospace">catalog:</text>
-  <text x="155" y="440" fill="#94a3b8" font-size="14" font-family="monospace">image: unity-catalog</text>
-  <text x="155" y="462" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["8081:8081"]</text>
+  <text x="155" y="440" fill="#94a3b8" font-size="14" font-family="monospace">image: unitycatalog/unitycatalog:v0.7.0</text>
+  <text x="155" y="462" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["8081:8080"]</text>
 
   <!-- kafka block -->
   <rect x="115" y="486" width="390" height="86" rx="8" fill="#111c2e" stroke="#f59e0b" stroke-width="1.5"/>
   <text x="135" y="514" fill="#fbbf24" font-size="16" font-family="monospace">kafka:</text>
-  <text x="155" y="538" fill="#94a3b8" font-size="14" font-family="monospace">image: apache/kafka</text>
-  <text x="155" y="560" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["9092:9092"]</text>
+  <text x="155" y="538" fill="#94a3b8" font-size="14" font-family="monospace">image: confluentinc/cp-kafka</text>
+  <text x="155" y="560" fill="#94a3b8" font-size="14" font-family="monospace">ports: ["29092:29092"]</text>
 
   <!-- command in middle -->
   <rect x="560" y="360" width="160" height="52" rx="10" fill="#0f172a" stroke="#22c55e" stroke-width="2"/>
