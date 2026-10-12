@@ -17,6 +17,56 @@ By the end of this chapter you'll be able to:
 - Tear the local lakehouse down cleanly, understanding what's preserved versus wiped.
 - Name concrete next steps to deepen each layer.
 
+## What you built: one real repository
+
+Before the victory lap, look at the actual artifact. Everything in this course accreted into one coherent, installable project, not a folder of disconnected scripts:
+
+```
+open-lakehouse/
+├── docker-compose.yml      # every service: SeaweedFS, Spark, Unity Catalog, Kafka, Airflow, MLflow
+├── pyproject.toml          # the installable `lakehouse` package
+├── Makefile                # one-command operations (below)
+├── .env / .env.example     # secrets, gitignored
+├── config/
+│   ├── spark/spark-defaults.conf
+│   └── unity-catalog/server.properties
+├── lakehouse/              # the shared package every layer imports
+│   ├── config.py           # one source of truth for endpoints + catalog name
+│   ├── session.py          # get_spark() factory
+│   ├── generate.py         # the source-data generator
+│   ├── ingest.py           # idempotent, date-parameterized Bronze ingest
+│   └── quality.py          # reusable Silver cleaning
+├── pipelines/medallion/    # the SDP project (Silver + Gold)
+├── dags/medallion.py       # Airflow DAG, imports lakehouse.ingest
+├── ml/train.py             # MLflow training on Gold
+├── tests/test_quality.py   # unit test for the cleaning rules
+└── AGENTS.md               # how an agent operates the stack
+```
+
+Notice the shape: `lakehouse/` holds the logic once, and `dags/`, `ml/`, `pipelines/`, and `tests/` all import from it. The DAG runs the same `ingest_orders` you call by hand; the pipeline cleans with the same `clean_orders` the test verifies. That one-definition-per-thing is what separates a real codebase from a pile of chapter snippets, and it's why this is a stack you could actually keep running rather than a demo you'd throw away.
+
+## Operate it with one command
+
+Production systems don't make you memorize a dozen incantations. Tie the common operations together in a `Makefile` at the repo root (recipe lines are tab-indented):
+
+```makefile
+up:            # bring the whole stack up
+	docker compose up -d
+down:          # stop everything, keep data volumes
+	docker compose down
+ps:            # health check
+	docker compose ps
+ingest:        # generate + land a Bronze batch
+	python -m lakehouse.generate
+	python -m lakehouse.ingest 2026-01-05
+pipeline:      # build Silver + Gold
+	cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002
+test:          # run the tests
+	pytest tests/
+```
+
+Now the whole lifecycle is `make up`, `make ingest`, `make pipeline`, `make test`, `make down`. That is the operator surface a teammate, or an agent (Chapter 12), drives, and it's the final touch that makes the project feel like a product instead of an exercise.
+
 ## Self-hosted vs. managed
 
 > **Self-hosted vs. managed** *(canonical term)*: you run the infrastructure yourself (this whole course) versus a cloud vendor runs it for you (EMR, Databricks, MSK, managed Airflow).
@@ -35,6 +85,28 @@ Taking this to the cloud doesn't change the architecture, only who runs the boxe
 
 - **Self-hosted on cloud:** the same open components, just on cloud infrastructure. Spark on ECS or EMR, object storage on S3, the catalog's Postgres on RDS. You still run the open stack; the cloud provides the machines.
 - **Fully managed:** a platform like Databricks runs Spark, the catalog, and the pipelines for you. Your Iceberg tables and SDP/Spark code still port over, because they're open.
+
+To make "declare the infrastructure" concrete, here is the *shape* of the self-hosted-on-cloud path in Terraform. This is illustrative, not something you apply in this course (that would mean a cloud account and a bill); read it for the mapping from each local service to its cloud counterpart:
+
+```hcl
+# ILLUSTRATIVE ONLY: the shape of a cloud deployment, not a deployment to run.
+
+resource "aws_s3_bucket" "lakehouse" {
+  bucket = "my-org-lakehouse"            # replaces local SeaweedFS (same S3 API)
+}
+
+resource "aws_db_instance" "catalog" {
+  engine         = "postgres"            # the catalog's metadata DB, now managed
+  instance_class = "db.t3.micro"
+}
+
+# Spark would run on EMR or ECS; Unity Catalog on a small instance or managed host.
+# Your Iceberg tables, SDP definitions, and Spark code do not change: only the
+# endpoints and credentials in your config point at these cloud resources instead
+# of localhost. That is the whole "lift, not rewrite" claim, in a config file.
+```
+
+Notice what is *not* in that file: any change to your pipeline logic or table definitions. You swap `localhost:8333` for the S3 bucket's endpoint and `seaweedfs`'s keys for IAM, and the stack you built runs unchanged.
 
 > **Infrastructure as code** means the deployment is declared in Terraform and applied reproducibly, the same declarative philosophy you saw in SDP (Chapter 7) and Airflow DAGs (Chapter 9): describe the desired state, let the tool converge to it.
 
@@ -56,6 +128,17 @@ docker compose ps
 Expected: all services stop and the containers are removed; `docker compose ps` shows nothing running. Your data volumes (`seaweedfs-data`, the catalog's Postgres, etc.) remain, so a later `docker compose up -d` resumes where you left off.
 
 **What just happened?** `docker compose down` is the gentle option: it halts and removes the running services but leaves your data volumes intact. Think of it as closing the shop for the night, not demolishing it. When you come back and `docker compose up -d`, your Iceberg tables, catalog entries, and everything else are exactly where you left them. This is the command for "I'm done for today," not "I'm done forever."
+
+Prove it, don't trust it. Bring the stack back up and confirm your Gold table survived the full stop/start:
+
+```bash
+docker compose up -d
+# wait for the catalog and Spark to be healthy, then:
+python3 -c "from lakehouse.session import get_spark; \
+print(get_spark().table('iceberg.gold.daily_revenue').count(), 'Gold rows survived')"
+```
+
+Expected: the same row count you had before the teardown. The containers were destroyed and recreated, but the data lived in named volumes, not in the containers, so it is exactly where you left it. That separation of compute (ephemeral containers) from storage (durable volumes) is the same decoupling principle from Chapter 1, now visible in your teardown habit.
 
 **Step 2: full reset, only if you want a clean slate (this wipes data).** The `-v` flag removes the named volumes too:
 
@@ -114,6 +197,7 @@ Every layer, built by you, running on your own machine, entirely open source. If
 
 ## Recap
 
+- What you built is one installable `lakehouse` project with a shared package, SDP pipelines, DAGs, training, tests, and a `Makefile`, operated with one command, not a pile of snippets.
 - Self-hosted (this course) and managed run the same open stack; open standards make migration a lift, not a rewrite, the anti-lock-in bet from Chapter 1 paying off.
 - The cloud path is Terraform, declarative infrastructure, toured here without cost; "declare the end state, let the tool converge" recurs at every layer.
 - Teardown is one command; `docker compose down` preserves data, `docker compose down -v` wipes it. Reversible steps can be automatic, irreversible ones deserve a pause.

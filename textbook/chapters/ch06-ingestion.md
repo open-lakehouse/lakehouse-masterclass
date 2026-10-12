@@ -17,7 +17,7 @@ By the end of this chapter you'll be able to:
 - Define ingestion and explain the role of the Bronze layer.
 - Contrast ELT with ETL and say why lakehouses default to ELT.
 - Explain idempotency and why an ingestion job must be safely re-runnable.
-- Generate sample data and ingest it into an Iceberg Bronze table with Spark Connect.
+- Write a reusable, date-parameterized `lakehouse.ingest.ingest_orders` module that lands data into an Iceberg Bronze table idempotently, the same function Chapter 9 will schedule.
 
 ## What ingestion is, and the golden rule of Bronze
 
@@ -61,91 +61,135 @@ When would you choose merge instead of partition overwrite? When you're ingestin
 
 ## Build: generate data and ingest into Bronze
 
-In production, the source would be an application database, an event stream, a partner's API export, or a file drop. To keep this chapter self-contained, you'll generate a batch of realistic, deliberately messy order records yourself and write them to a raw location in object storage. That raw drop stands in for a real source system. (When you have a real dataset, this is exactly where it slots in: write it to `s3a://lakehouse/raw/orders/` and the ingest steps below are unchanged.)
+In production, the source would be an application database, an event stream, a partner's API export, or a file drop. To keep this chapter self-contained, you'll generate a batch of realistic, deliberately messy order records and write them to a raw location in object storage, standing in for a real source system. (When you have a real dataset, this is where it slots in: write it to `s3a://lakehouse/raw/orders/` and the ingest below is unchanged.)
 
-**Step 1: generate a raw batch.** Save this as `pipelines/generate_orders.py`. It uses the same Spark Connect session you already know to synthesize orders and write them as JSON to the raw bucket, with a few nulls and odd values on purpose so the cleaning work in Chapter 7 is real rather than a toy.
+You'll write two real modules in your `lakehouse` package, not throwaway scripts: a generator and an ingest. The ingest in particular is the one your Airflow DAG imports and schedules in Chapter 9, so it's worth writing properly now.
+
+First, add the raw location to your config so the generator and ingest agree on where raw data lands. Extend `lakehouse/config.py` from Chapter 4:
 
 ```python
+# lakehouse/config.py  (add this line)
+RAW_PREFIX = os.environ.get("RAW_PREFIX", "s3a://lakehouse/raw")
+```
+
+**Step 1: write the generator.** Save this as `lakehouse/generate.py`. It uses the project's `get_spark()` factory to synthesize orders and write them as JSON to the raw location, with nulls and odd values on purpose so Chapter 7's cleaning is real rather than a toy:
+
+```python
+# lakehouse/generate.py
 import random
 from datetime import datetime, timedelta
-from pyspark.sql import SparkSession, functions as F
+from lakehouse.session import get_spark
+from lakehouse.config import RAW_PREFIX
 
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
-
-statuses = ["placed", "shipped", "cancelled", "placed", "placed"]
-rows = []
-base = datetime(2026, 1, 5, 9, 0, 0)
-for i in range(1000):
-    rows.append((
+def generate_orders(n: int = 1000, start: datetime = datetime(2026, 1, 5, 9)) -> int:
+    """Write n deliberately-messy raw order records to the raw drop."""
+    spark = get_spark("generate-orders")
+    statuses = ["placed", "shipped", "cancelled", "placed", "placed"]
+    rows = [(
         f"o-{1000 + i}",
-        random.choice([f"c-{random.randint(1, 200)}", None]),   # some guest checkouts (null)
-        round(random.choice([random.uniform(5, 500), -1.0]), 2),  # a few bad amounts
+        random.choice([f"c-{random.randint(1, 200)}", None]),      # some guest checkouts (null)
+        round(random.choice([random.uniform(5, 500), -1.0]), 2),   # a few bad amounts
         random.choice(statuses),
-        (base + timedelta(minutes=i)).isoformat(),
-    ))
+        (start + timedelta(minutes=i)).isoformat(),
+    ) for i in range(n)]
+    df = spark.createDataFrame(rows, ["order_id", "customer_id", "amount", "status", "created_at"])
+    df.write.mode("overwrite").json(f"{RAW_PREFIX}/orders/")
+    return df.count()
 
-raw = spark.createDataFrame(rows, ["order_id", "customer_id", "amount", "status", "created_at"])
-raw.write.mode("overwrite").json("s3a://lakehouse/raw/orders/")
-print("wrote", raw.count(), "raw order records")
+if __name__ == "__main__":
+    print("wrote", generate_orders(), "raw order records")
 ```
 
-Run it from your host:
+Run it as a module:
 
 ```bash
-python3 pipelines/generate_orders.py
+python -m lakehouse.generate
+# -> wrote 1000 raw order records
 ```
 
-**What just happened?** You stood in for a source system. The script wrote 1000 raw order records as JSON files into `s3a://lakehouse/raw/orders/`, including some nulls and a few negative amounts. That messiness is deliberate; it is what makes Chapter 7's cleaning meaningful.
+**What just happened?** You stood in for a source system, but notice this is a *function in your package*, not a loose script: it can be called from a test, a notebook, or another module, and it gets its Spark session and raw location from the same shared config as everything else. The run wrote 1000 raw records to `s3a://lakehouse/raw/orders/`, nulls and negative amounts included. That messiness is deliberate; it is what makes Chapter 7's cleaning meaningful.
 
-**Step 2: read the raw source and add ingestion metadata.** Reading the raw drop and tagging it with how and when you got it is the "faithful capture" part of Bronze.
+See what actually landed. The write didn't produce one file; Spark writes one file per partition of the DataFrame, so list the raw prefix:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/raw/orders/
+# .../raw/orders/part-00000-....json
+# .../raw/orders/_SUCCESS
+```
+
+The `_SUCCESS` marker is Spark's "this write finished cleanly" flag, and the `part-*` files hold the JSON. This is a raw drop, plain JSON, no table semantics yet; that comes when you land it into Iceberg below.
+
+**Step 2: write the ingest.** This module reads the raw drop, tags it with ingestion metadata (the "faithful capture" part of Bronze), and lands it into the Bronze Iceberg table idempotently. It's the one Chapter 9 schedules, so write it as a real, parameterized function. Save it as `lakehouse/ingest.py`:
 
 ```python
-from pyspark.sql import SparkSession, functions as F
+# lakehouse/ingest.py
+import logging
+from pyspark.sql import functions as F
+from lakehouse.session import get_spark
+from lakehouse.config import CATALOG, RAW_PREFIX
 
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
+log = logging.getLogger(__name__)
 
-# Read the raw generated orders.
-raw = spark.read.json("s3a://lakehouse/raw/orders/")
+def ingest_orders(ingest_date: str) -> int:
+    """Land one day's raw orders into the Bronze table, idempotently.
+    Re-running the same ingest_date overwrites only that partition, so a retry
+    never duplicates. `ingest_date` (YYYY-MM-DD) is the batch's logical date,
+    which is what lets Chapter 9 backfill any past day."""
+    spark = get_spark("ingest-orders")
 
-bronze = (
-    raw
-    .withColumn("_ingested_at", F.current_timestamp())            # when we landed it
-    .withColumn("_source",      F.lit("orders-generator"))        # where it came from
-    .withColumn("_ingest_date", F.to_date(F.current_timestamp())) # partition key
-)
+    # Create the Bronze table once, partitioned by ingest date.
+    spark.sql(f"""
+        CREATE TABLE IF NOT EXISTS {CATALOG}.bronze.orders_raw (
+            order_id STRING, customer_id STRING, amount DOUBLE, status STRING,
+            created_at STRING, _ingested_at TIMESTAMP, _source STRING, _ingest_date DATE
+        ) USING iceberg PARTITIONED BY (_ingest_date)
+    """)
+
+    # Faithful capture: keep the source data as-is, add only ingestion metadata.
+    bronze = (spark.read.json(f"{RAW_PREFIX}/orders/")
+        .withColumn("_ingested_at", F.current_timestamp())            # when we landed it
+        .withColumn("_source",      F.lit("orders-generator"))        # where it came from
+        .withColumn("_ingest_date", F.lit(ingest_date).cast("date"))) # which batch
+
+    # Idempotent load: replace only this date's partition.
+    bronze.writeTo(f"{CATALOG}.bronze.orders_raw").overwritePartitions()
+
+    n = spark.table(f"{CATALOG}.bronze.orders_raw").count()
+    log.info("bronze.orders_raw now has %d rows", n)
+    return n
+
+if __name__ == "__main__":
+    import sys
+    date = sys.argv[1] if len(sys.argv) > 1 else "2026-01-05"
+    print(ingest_orders(date), "rows in bronze.orders_raw")
 ```
 
-**What just happened?** Notice you added three metadata columns but changed nothing about the source data itself. Those `_`-prefixed columns answer questions you'll be grateful for later: when did we land this (`_ingested_at`), where did it come from (`_source`), and which day's batch is it (`_ingest_date`, which we'll partition by). This metadata is the one exception to "don't touch the data": recording the circumstances of ingestion is part of faithful capture, not a transformation of the content.
+Run it for one day's batch:
 
-**Step 3: write to the Bronze Iceberg table idempotently,** partitioned by ingest date so a re-run replaces just that day rather than duplicating it.
-
-```python
-# Create the Bronze table once, partitioned by ingest date.
-spark.sql("""
-    CREATE TABLE IF NOT EXISTS iceberg.bronze.orders_raw (
-        order_id STRING, customer_id STRING, amount DOUBLE, status STRING,
-        created_at STRING, _ingested_at TIMESTAMP, _source STRING, _ingest_date DATE
-    )
-    USING iceberg
-    PARTITIONED BY (_ingest_date)
-""")
-
-# Idempotent load: overwrite only the partition(s) present in this batch.
-(bronze.writeTo("iceberg.bronze.orders_raw")
-       .overwritePartitions())     # re-running the same day is safe
+```bash
+python -m lakehouse.ingest 2026-01-05
+# -> 1000 rows in bronze.orders_raw
 ```
 
-**What just happened?** `overwritePartitions()` is the idempotency mechanism in action. Instead of blindly appending (which would duplicate on a re-run), it replaces the partitions present in this batch. If today's batch is `_ingest_date = 2026-01-05`, running it again simply overwrites that one day's partition with the same data, same result, no duplicates. Yesterday's partitions are untouched. This is the safe-retry property made concrete in code.
+**What just happened?** Two production habits worth calling out. First, the three `_`-prefixed metadata columns answer questions you'll be grateful for later: when we landed it (`_ingested_at`), where it came from (`_source`), and which batch it is (`_ingest_date`, the partition key). Recording the circumstances of ingestion is the one exception to "don't touch the data": it's faithful capture, not transformation. Second, and this is the one that matters, `_ingest_date` is a *parameter*, not `today()`. The job lands "the 2026-01-05 batch" no matter when it runs, which is exactly what makes re-running and backfilling correct. `overwritePartitions()` then replaces only that date's partition, so running it again is a no-op on the row count. Pass a date, overwrite that partition: idempotent by construction, and in Chapter 9 the orchestrator will pass a different date to backfill history, reusing this exact function unchanged.
 
-**Step 4: verify the landing, and prove idempotency** by running Step 3 again and confirming the count does not change.
+**Step 3: prove idempotency** by running the ingest a second time and confirming the count does not change.
 
-```python
-spark.table("iceberg.bronze.orders_raw").count()
-# run the write again ... then:
-spark.table("iceberg.bronze.orders_raw").count()   # same number, no duplicates
+```bash
+python -m lakehouse.ingest 2026-01-05    # run the exact same batch again
+# -> 1000 rows in bronze.orders_raw       (unchanged)
 ```
 
-Expected: the second run leaves the row count unchanged. That's idempotency you can see. This is worth doing deliberately once, because "the count didn't change when I ran it twice" is the most satisfying and concrete proof that your ingest is safe to retry. If you'd used a naive append, the count would have doubled; try that too (in a scratch table) so you feel the difference.
+Expected: the second run leaves the row count at exactly `1000`. That's idempotency you can see, and because `ingest_orders` overwrites only the `2026-01-05` partition, running it ten more times still leaves 1000. This is worth doing deliberately once, because "the count didn't change when I ran it twice" is the most satisfying and concrete proof that your ingest is safe to retry. If you'd used a naive append, the count would have doubled to `2000`; try that too (in a scratch table) so you feel the difference.
+
+Now look at how Iceberg laid the Bronze table out, because the partitioning is physical. List the table's data prefix:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/warehouse/ | grep "orders_raw/data"
+# .../bronze/orders_raw/data/_ingest_date=2026-01-05/00000-....parquet
+```
+
+Notice the `_ingest_date=2026-01-05/` directory in the path: that is `PARTITIONED BY (_ingest_date)` made concrete. Each day's batch lands under its own partition prefix, which is exactly why `overwritePartitions()` can replace one day without touching another, it rewrites only the objects under that one `_ingest_date=` prefix. Partitioning isn't an abstract tuning knob; it's a directory layout you can see, and it's what makes the idempotent per-day overwrite physically possible.
 
 ## Batch now, streaming later
 
@@ -164,7 +208,7 @@ Batch is the right default for most ingestion and the easiest to reason about, p
 
 ## Checkpoint
 
-- `generate_orders.py` wrote raw order records to `s3a://lakehouse/raw/orders/`.
+- `lakehouse/generate.py` wrote raw order records to `s3a://lakehouse/raw/orders/`.
 - You ingested the raw orders into `iceberg.bronze.orders_raw` over `sc://`, adding `_ingested_at`, `_source`, and `_ingest_date` metadata.
 - The Bronze table is partitioned by `_ingest_date`.
 - Running the write twice left the row count unchanged: the ingest is idempotent.
@@ -189,6 +233,7 @@ Batch is the right default for most ingestion and the easiest to reason about, p
 - Ingestion lands raw source data into Bronze with maximum fidelity and minimal transformation: never lose information you can't recreate.
 - Lakehouses default to ELT: load raw first, transform in place later, keep the raw forever.
 - Ingestion must be idempotent: use partition overwrite or key-based merge, not blind append, so retries are always safe.
+- You wrote it as real package modules (`lakehouse/generate.py`, `lakehouse/ingest.py`) with the ingest parameterized by date, so Chapter 9 can schedule and backfill it by importing the same function, not copying it.
 - This was batch; streaming ingestion of the same table comes in Chapter 8.
 - **Next, Chapter 7, Transformation:** turn raw Bronze into clean Silver and business-ready Gold with Spark Declarative Pipelines.
 

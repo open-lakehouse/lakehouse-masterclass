@@ -16,6 +16,7 @@ By the end of this chapter you'll be able to:
 - Explain what Spark Connect is, how it differs from the classic embedded-driver model, and why this course standardizes on it.
 - Weigh the advantages of Spark Connect against its honest trade-offs, so you know what you give up along with what you gain.
 - Add Spark as a service on the Compose network and connect a Python client to it with `sc://` to run a job.
+- Centralize the connection into a reusable `lakehouse.session.get_spark()` factory that every later chapter imports instead of re-creating.
 
 ## What Spark is, and what "distributed compute" really means
 
@@ -155,11 +156,27 @@ docker compose up -d
 docker compose ps
 ```
 
-Expected: `docker compose ps` now shows `seaweedfs`, `spark-master`, `spark-worker`, and `spark-connect` all running. The first `up` pulls the Spark image, which is large, so give it a minute.
+Expected: `docker compose ps` now shows four services, all up:
+
+```
+NAME            IMAGE                                             STATUS         PORTS
+seaweedfs       chrislusf/seaweedfs:3.80                          Up 2 minutes   0.0.0.0:8333->8333/tcp
+spark-master    apache/spark:4.1.0-scala2.13-java21-...-ubuntu    Up 40 seconds  0.0.0.0:8080->8080/tcp
+spark-worker    apache/spark:4.1.0-scala2.13-java21-...-ubuntu    Up 38 seconds
+spark-connect   apache/spark:4.1.0-scala2.13-java21-...-ubuntu    Up 35 seconds  0.0.0.0:15002->15002/tcp
+```
+
+The first `up` pulls the Spark image, which is large, so give it a minute. The worker publishes no host port on purpose: nothing on your laptop talks to it directly, only the master and Connect server do, over the network, by service name.
 
 **What just happened?** You started three related things: a Spark master (the coordinator that hands out work), a worker (the process that actually runs tasks), and the Connect server (the gRPC endpoint your thin client will talk to). The master and worker are the "kitchen," and the Connect server is the "waiter" taking your orders. All three run in containers on the same network as your storage, so in later chapters Spark will reach the object store at `seaweedfs:8333` by service name.
 
-Step 3. Open the Spark UI to see the cluster. Visit `http://localhost:8080` in your browser. You should see one worker registered and no applications running yet. The Spark UI is one of the most useful debugging tools you have: it shows running jobs, how work was split into tasks, and where time is spent. Get in the habit of opening it; when a job is mysteriously slow later, the UI usually shows why (one partition doing all the work, a stage retrying, and so on).
+Step 3. Open the Spark UI to see the cluster. Visit `http://localhost:8080` in your browser, this is the standalone master's UI. Three things are worth reading on this page, because they tell you the cluster is actually healthy:
+
+- **Workers.** You should see exactly one worker with state `ALIVE`, along with its cores and memory (for example `4 Cores, 4.0 GiB`). If the worker is missing or `DEAD`, the worker never registered, check `docker compose logs spark-worker`.
+- **Running Applications.** You'll see one running application: the Connect server itself, which registered with the master at startup (a name like `Spark Connect server`). That is the long-lived application your thin client's work runs inside.
+- **Cores / Memory in use.** The header shows how much of the cluster is claimed. The Connect server holds some; the rest is free for your jobs.
+
+(Exact labels and the application's displayed name vary by Spark build; confirm them on your running UI.) The Spark UI is one of the most useful debugging tools you have: it shows running jobs, how work was split into tasks, and where time is spent. Get in the habit of opening it; when a job is mysteriously slow later, the UI usually shows why (one partition doing all the work, a stage retrying, and so on). Keep this tab open, you'll come back to it the moment you run a job.
 
 Step 4. Connect a thin client and run your first job. From your host, in a Python environment with `pyspark` installed. Pin it to match the server (`pip install 'pyspark==4.1.0'`), since a bare `pip install pyspark` now pulls a newer release than the 4.1.0 cluster, and a version skew between client and server causes confusing errors:
 
@@ -189,6 +206,17 @@ Expected output:
 
 **What just happened?** Look closely at `.remote("sc://localhost:15002")`. That one call is the entire lesson of this chapter. You did not start a Spark engine in your Python process; you opened a thin gRPC connection to the remote Connect server and asked it to run `spark.range(5)`. The five rows came back over the wire as Arrow batches. Your Python process stayed tiny throughout. This is the exact pattern every later chapter uses to talk to Spark.
 
+Prove the compute is remote, not local. Two quick confirmations in the same session:
+
+```python
+print(spark.version)   # -> 4.1.0  (the SERVER's version, not your local pyspark)
+
+# Make the cluster do real, visible work: 2 million rows, grouped (forces a shuffle).
+spark.range(2_000_000).selectExpr("id % 10 AS bucket").groupBy("bucket").count().orderBy("bucket").show()
+```
+
+The version you print is whatever the Connect server runs, so even if your local `pyspark` were a different build, this returns `4.1.0`, the remote engine answered. Now go back to the Spark UI tab from Step 3 and refresh it. Click into the running `Spark Connect server` application: you'll see the jobs you just ran, each split into tasks across the worker's cores, with timings. That is the direct, visual payoff of this chapter, your one-line `.remote(...)` client handed work to a real distributed engine, and the UI shows that engine doing it. (If the per-application job view isn't reachable in your setup, the master page still shows the application as active with cores in use; the detailed job/stage view lives on the application's own UI.)
+
 Step 5. Point the client somewhere else without changing code, using an environment variable or URL parameters:
 
 ```bash
@@ -200,6 +228,44 @@ export SPARK_REMOTE="sc://localhost:15002"
 ```
 
 This portability, same code and different endpoint, is exactly why you can develop locally and later point at a bigger cluster with a one-line change. The Python you wrote in Step 4 doesn't know or care whether Spark is on your laptop or a hundred-node cluster in the cloud. That's not a small convenience; it's the reason Connect is the modern default.
+
+Step 6. Make the connection reusable, once, for the whole project. You just saw that the only thing that varies between environments is the `sc://` URL. Every later chapter opens a session the same way, so re-typing `SparkSession.builder.remote("sc://localhost:15002")` in each one is exactly the kind of copy-paste that rots a codebase: the day the URL changes, you hunt it down in a dozen files. Put it in your `lakehouse` package once. Create `lakehouse/config.py`, the single source of truth for every connection detail, reading the environment with sensible local defaults:
+
+```python
+# lakehouse/config.py
+import os
+
+# The one place every endpoint and name lives. Env-driven, so the SAME code
+# runs on your laptop and against a cloud deployment by changing env vars,
+# never a line of application code.
+SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "sc://localhost:15002")
+CATALOG      = os.environ.get("LAKEHOUSE_CATALOG", "iceberg")  # used from Chapter 5 on
+```
+
+Then a session factory in `lakehouse/session.py`:
+
+```python
+# lakehouse/session.py
+from pyspark.sql import SparkSession
+from lakehouse.config import SPARK_REMOTE
+
+def get_spark(app: str = "lakehouse") -> SparkSession:
+    """The project's one Spark Connect session factory. Everything, chapters,
+    DAGs, training scripts, tests, gets its session here, so there is exactly
+    one place that knows how to reach Spark."""
+    return SparkSession.builder.appName(app).remote(SPARK_REMOTE).getOrCreate()
+```
+
+Now the Step 4 job, rewritten the way every later chapter will open a session:
+
+```python
+from lakehouse.session import get_spark
+
+spark = get_spark("first-job")
+spark.range(5).show()
+```
+
+**What just happened?** You turned a one-off connection into project infrastructure. From here on you will not see `SparkSession.builder.remote(...)` again; every chapter starts with `from lakehouse.session import get_spark`. That is the difference between a pile of demo scripts and a codebase: shared setup lives in one tested place, and the environment (laptop versus cloud) is a config concern, not a code concern. This is the first module in your `lakehouse` package, and the pattern, write it once, import it everywhere, is what makes the rest of the course compound instead of repeat.
 
 Step back and look at what you've stood up. Your stack is now two layers deep: the object store from Chapter 3, and a Spark cluster you drive over `sc://` from a thin client. Storage and compute are separate services on the same network, exactly as the lakehouse promises, and every layer above (tables, ingestion, transformation) will run on this same engine.
 
@@ -248,6 +314,7 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 - Spark is **lazy**: transformations build a plan, actions run it.
 - You drive it with **Spark Connect**, a thin client over `sc://`, for portability, isolation, and thin dependencies, accepting the DataFrame and SQL surface in exchange.
 - Static config lives **server-side**, in the mounted config directory; remember `CANNOT_MODIFY_STATIC_CONFIG`.
+- You wrote the first module of your `lakehouse` package, `config.py` and `session.py`, so every later chapter opens its session with `from lakehouse.session import get_spark`, not re-pasted boilerplate.
 - **Next, Chapter 5, Tables and Catalog:** create real Iceberg tables through Unity Catalog OSS, evolve their schema, and travel through their snapshots.
 
 ![Progress: Compute complete, Tables next](../figures/ch04/fig-4.5-progress-compute-done.svg)

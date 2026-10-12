@@ -183,7 +183,14 @@ docker compose up -d
 docker compose ps
 ```
 
-Expected: `docker compose ps` shows the `seaweedfs` service running. The `-d` flag runs it in the background (detached), so you get your shell back; this is the normal way to run long-lived services, unlike the foreground `hello-world` run in Chapter 2.
+Expected: `docker compose ps` shows one service, up and with the S3 port published:
+
+```
+NAME        IMAGE                      STATUS         PORTS
+seaweedfs   chrislusf/seaweedfs:3.80   Up 5 seconds   0.0.0.0:8333->8333/tcp
+```
+
+The `-d` flag runs it in the background (detached), so you get your shell back; this is the normal way to run long-lived services, unlike the foreground `hello-world` run in Chapter 2. If `STATUS` says `Restarting` or `Exited`, the container isn't healthy, go straight to `docker compose logs seaweedfs` and the troubleshooting section rather than pushing on.
 
 Step 4. Create the warehouse bucket and round-trip a file. Point any S3 client at the published endpoint. Using the AWS CLI (installed in Chapter 2):
 
@@ -205,6 +212,25 @@ aws --endpoint-url http://localhost:8333 s3 ls s3://lakehouse/test/
 aws --endpoint-url http://localhost:8333 s3 cp s3://lakehouse/test/hello.txt /tmp/back.txt
 cat /tmp/back.txt   # -> hello lakehouse
 ```
+
+Expected output, step by step:
+
+```
+make_bucket: lakehouse                                    # s3 mb
+upload: ../tmp/hello.txt to s3://lakehouse/test/hello.txt # s3 cp (in)
+2026-01-05 09:00:00         15 hello.txt                  # s3 ls
+download: s3://lakehouse/test/hello.txt to ../tmp/back.txt # s3 cp (out)
+hello lakehouse                                           # cat
+```
+
+The last line is the whole point: the exact 15 bytes you put in came back out. Now look at how SeaweedFS actually stored it, list the bucket recursively:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse
+# 2026-01-05 09:00:00         15 test/hello.txt
+```
+
+Notice there is no `test/` directory object, only a single object whose *key* is `test/hello.txt`. Object storage has no real folders; the slashes are just characters in a flat key namespace, and clients render them as folders for convenience. That one detail explains a lot about how Iceberg lays out tables later: a "table directory" is really just a shared key prefix across many objects.
 
 Two settings there aren't optional against a local endpoint. The AWS CLI insists on a region even when it's meaningless here, so `AWS_DEFAULT_REGION` keeps it from erroring. And `path` addressing matters because the CLI defaults to virtual-host style (`bucket.localhost`), which doesn't resolve for a local store; path style (`localhost:8333/bucket`) is what SeaweedFS and MinIO expect.
 

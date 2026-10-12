@@ -16,6 +16,7 @@ By the end of this chapter you'll be able to:
 - Explain what Spark Declarative Pipelines are and how they differ from hand-written pipeline scripts.
 - Declare Silver and Gold datasets with dependencies and let SDP derive the graph.
 - Enforce data quality inside a dataset definition, and know what OSS SDP does and does not give you here.
+- Factor cleaning into a reusable `lakehouse.quality` function and unit-test it on its own, independent of the pipeline.
 
 ## The medallion: Bronze to Silver to Gold
 
@@ -83,29 +84,41 @@ libraries:
 
 The `catalog` is the Unity Catalog OSS catalog you built in Chapter 5. `storage` is a local directory SDP uses for streaming-table checkpoints and pipeline state. `libraries` tells SDP where your dataset definitions live.
 
-**Step 3: declare the datasets.** Create `medallion/transformations/medallion.py`. Each function returns a DataFrame and is registered as a dataset; dependencies are expressed by reading other tables with `spark.read.table(...)`.
+**Step 3: put reusable cleaning in the package, then declare the datasets.** The Silver cleaning (drop bad rows, dedupe, conform types) is exactly the kind of logic you want reusable and testable, not buried in a pipeline file. Put it in `lakehouse/quality.py` as a plain DataFrame-in, DataFrame-out function:
+
+```python
+# lakehouse/quality.py
+from pyspark.sql import DataFrame, functions as F
+
+def clean_orders(df: DataFrame) -> DataFrame:
+    """Silver-grade cleaning: drop invalid rows, dedupe, conform types.
+    A pure transformation (DataFrame in, DataFrame out), so it is reusable and
+    unit-testable on its own, without running the whole pipeline."""
+    return (df
+        .filter("order_id IS NOT NULL")                 # must have a key
+        .filter("amount > 0")                           # drop bad amounts
+        .dropDuplicates(["order_id"])                   # one row per order
+        .withColumn("status", F.lower(F.col("status"))) # conform casing
+        .withColumn("created_at", F.to_timestamp("created_at"))
+        .select("order_id", "customer_id", "amount", "status", "created_at"))
+```
+
+Now create the SDP datasets in `medallion/transformations/medallion.py`. Each function returns a DataFrame and is registered as a dataset; dependencies are expressed by reading other tables with `spark.read.table(...)`. Silver is now a one-liner that calls your reusable cleaner:
 
 ```python
 from pyspark import pipelines as dp
 from pyspark.sql import SparkSession, functions as F
+from lakehouse.quality import clean_orders
 
 # SDP loads this file directly, so bind the active session explicitly;
 # nothing injects `spark` into a transformations module for you.
 spark = SparkSession.active()
 
 
-# SILVER: clean and conform the raw Bronze orders.
+# SILVER: clean and conform the raw Bronze orders (logic lives in lakehouse.quality).
 @dp.materialized_view(name="silver.orders")
 def silver_orders():
-    return (
-        spark.read.table("iceberg.bronze.orders_raw")
-        .filter("order_id IS NOT NULL")          # quality: must have a key
-        .filter("amount > 0")                    # quality: drop bad amounts
-        .dropDuplicates(["order_id"])            # one row per order
-        .withColumn("status", F.lower(F.col("status")))   # conform casing
-        .withColumn("created_at", F.to_timestamp("created_at"))  # type the timestamp
-        .select("order_id", "customer_id", "amount", "status", "created_at")
-    )
+    return clean_orders(spark.read.table("iceberg.bronze.orders_raw"))
 
 
 # GOLD: daily revenue by status, business-ready.
@@ -119,6 +132,8 @@ def gold_daily_revenue():
              F.count("*").alias("order_count"))
     )
 ```
+
+For the SDP file to `import lakehouse.quality`, your package must be installed in the environment that runs `spark-pipelines`, which it is: you ran `pip install -e .` in Chapter 2.
 
 **What just happened?** Read the two functions and notice what's absent: nowhere do you say "run Silver before Gold," and you never call these functions yourself. `gold_daily_revenue` reads `iceberg.silver.orders`, and that read is the dependency. SDP scans the declarations, sees that Gold depends on Silver (which depends on Bronze), and infers the whole graph. You wrote what each dataset is, not when to build it. That's the declarative model in one screen of code.
 
@@ -136,8 +151,8 @@ Expected: SDP reports the resolved graph and materializes `iceberg.silver.orders
 **Step 5: query the Gold table over a thin client.**
 
 ```python
-from pyspark.sql import SparkSession
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
+from lakehouse.session import get_spark
+spark = get_spark()
 spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
 ```
 
@@ -152,6 +167,23 @@ Expected output: a small table of `order_date`, `status`, `revenue`, `order_coun
 |2026-01-05|  shipped| 9977.42|        131|
 +----------+---------+--------+-----------+
 ```
+
+**Step 6: see the cleaning actually happen.** The quality filters aren't theoretical, they removed rows. Compare the counts across the three tiers:
+
+```python
+spark.table("iceberg.bronze.orders_raw").count()  # ~1000: everything, warts and all
+spark.table("iceberg.silver.orders").count()      # fewer: nulls, bad amounts, dupes dropped
+# the shrinkage IS the data-quality work, made visible
+```
+
+Expected: Silver has visibly fewer rows than Bronze. Chapter 6's generator deliberately injected null `order_id`s, negative `amount`s, and the odd duplicate; the three `.filter`/`.dropDuplicates` lines in `silver_orders` dropped exactly those. The gap between the Bronze and Silver counts is the amount of bad data you kept out of Gold. Spot-check it directly, this should return zero rows, because Silver is clean by construction:
+
+```python
+spark.sql("SELECT * FROM iceberg.silver.orders WHERE amount <= 0 OR order_id IS NULL").show()
+# empty result: no bad rows survived into Silver
+```
+
+That empty result is the point of the medallion: Gold's revenue numbers are trustworthy because the bad data was filtered out one tier below, and you can prove it with a query rather than take it on faith.
 
 **What just happened?** You're reading a business-ready table: daily revenue and order counts by status. Trace its lineage in your head. These numbers came from Silver (clean, deduplicated orders), which came from Bronze (the raw landing), which came from the generator standing in for a source system. That full path, from raw event to business metric, is the entire data engineering flow in miniature, and you built it declaratively.
 
@@ -173,6 +205,41 @@ The instinct to reach for is: fail loud on things that must never happen; drop o
 ![Data-quality filtering in Silver](../figures/ch07/fig-7.3-data-quality.svg)
 
 **Figure 7.3**. Rows flow through the Silver definition's filters; invalid rows are filtered out so only trustworthy rows reach Silver.
+
+### Test the cleaning in isolation
+
+Pulling `clean_orders` out into `lakehouse/quality.py` bought you something a buried `.filter()` chain can't: you can test the data-quality logic directly, with a handful of known-bad rows, without running the whole pipeline. That is what "production-ready" looks like at the code level, the rules that protect your Gold numbers are themselves verified. Save this as `tests/test_quality.py`:
+
+```python
+# tests/test_quality.py
+from lakehouse.session import get_spark
+from lakehouse.quality import clean_orders
+
+def test_clean_orders_drops_bad_and_dedupes():
+    spark = get_spark("test")
+    df = spark.createDataFrame(
+        [("o1", "c1", 10.0, "PLACED", "2026-01-05T09:00:00"),   # valid (status uppercased)
+         ("o1", "c1", 10.0, "placed", "2026-01-05T09:00:00"),   # duplicate order_id
+         (None, "c2", 10.0, "placed", "2026-01-05T09:00:00"),   # null key -> dropped
+         ("o3", "c3", -1.0, "placed", "2026-01-05T09:00:00")],  # bad amount -> dropped
+        ["order_id", "customer_id", "amount", "status", "created_at"])
+
+    clean = clean_orders(df).collect()
+
+    assert len(clean) == 1                 # only o1 survives, and only once (deduped)
+    assert clean[0].order_id == "o1"
+    assert clean[0].status == "placed"     # casing conformed
+```
+
+Run it:
+
+```bash
+pip install pytest        # add to your project's dev dependencies
+pytest tests/test_quality.py -q
+# 1 passed
+```
+
+The test needs the Connect server up (it uses `get_spark()`), so it's really an integration test of your cleaning rules against a real engine. That's a deliberate trade for a lakehouse course: the rules are tested the way they actually run. Each new quality rule you add to `clean_orders` gets a case here, so a future edit that accidentally lets bad rows through fails the test instead of silently corrupting Gold.
 
 ## Troubleshooting
 
@@ -211,6 +278,7 @@ The instinct to reach for is: fail loud on things that must never happen; drop o
 - The medallion refines data forward: Bronze (raw) to Silver (clean) to Gold (business-ready). Clean once, aggregate many ways.
 - Spark Declarative Pipelines let you declare datasets and dependencies; the engine derives the graph and refresh, built on Spark Connect.
 - Data quality lives in the dataset definition as ordinary filters (drop) or raised errors (fail). The named-expectations API is a Databricks feature, not part of OSS.
+- Cleaning logic lives in a reusable `lakehouse/quality.py` function that Silver calls and `tests/` verifies, so the rules protecting Gold are themselves tested.
 - **Next, Chapter 8, Streaming:** feed the same Silver continuously from Kafka with a streaming table, and contrast streaming with the batch pipeline you just built.
 
 ![Progress: Transformation complete, Streaming next](../figures/ch07/fig-7.4-progress-transform-done.svg)

@@ -16,7 +16,7 @@ By the end of this chapter you'll be able to:
 
 - Install the prerequisites (Docker with Compose, Python, Git, and the AWS CLI) and say what each one is for in the stack.
 - Explain what Docker and Docker Compose actually give you here: reproducible services defined in a file, rather than software installed by hand on your machine.
-- Lay out a project directory that will hold the service definitions, configuration, and pipeline code you build over the rest of the course.
+- Lay out the project as an installable `lakehouse` Python package that later chapters add reusable modules to and import from, so the course builds one coherent codebase rather than disconnected scripts.
 - Keep configuration and secrets in a `.env` file that stays out of version control, and explain why that habit matters before you have any real credentials.
 - Confirm Docker can pull and run a container, so you know your foundation works before the first real service.
 
@@ -101,20 +101,48 @@ mkdir open-lakehouse && cd open-lakehouse
 git init
 ```
 
-You'll grow a specific structure over the course, but a little intention now saves cleanup later. Create these top-level folders:
+You'll grow a specific structure over the course, but a little intention now saves cleanup later. This is not a scratchpad for disconnected scripts; it's one project that will become a real, installable Python package, and every later chapter adds reusable code to it rather than re-typing boilerplate. Create the structure:
 
 ```bash
-mkdir compose config pipelines data
+mkdir -p config lakehouse pipelines dags ml data tests
+touch lakehouse/__init__.py
 ```
 
 What each is for:
 
-- **`compose/`** holds the service definitions. You can keep everything in one `docker-compose.yml` at the root, but as the stack grows it's cleaner to split it, one file per service, and combine them. Either way, this is where your infrastructure lives.
-- **`config/`** holds service configuration that isn't secret: the settings files each service reads. It gets populated as you add services.
-- **`pipelines/`** is where your data pipelines will live. You won't hand-build its internal structure: in the Transformation chapter you'll run Spark Declarative Pipelines' own initializer (`spark-pipelines init --name <project>`), which scaffolds a project subdirectory here containing a `spark-pipeline.yml` spec and a `transformations/` folder with example definitions. For now it's just an empty home waiting for that.
-- **`data/`** is a local scratch space for sample data and anything you don't want committed.
+- **`lakehouse/`** is the heart: a Python *package* holding the shared, reusable code the whole project runs on, the connection config, a Spark session factory, the ingestion and data-quality logic. This is what makes the course build one coherent system instead of a pile of one-off scripts: later chapters write modules here, and still-later chapters `import` them. Your Airflow DAG will import the same ingest function you wrote by hand, not a copy of it.
+- **`config/`** holds non-secret service configuration (the settings files each service reads). It gets populated as you add services.
+- **`pipelines/`** is where your Spark Declarative Pipelines project lives. You won't hand-build its internal structure: in the Transformation chapter you'll run `spark-pipelines init --name <project>`, which scaffolds a `spark-pipeline.yml` spec and a `transformations/` folder. For now it's an empty home.
+- **`dags/`** holds Airflow DAGs (Chapter 9); they stay thin and import from `lakehouse/`.
+- **`ml/`** holds model training code (Chapter 11).
+- **`data/`** is local scratch space for anything you don't want committed.
+- **`tests/`** holds a few real tests, because production code gets tested.
+- `docker-compose.yml` (your infrastructure) lives at the project root; you create it in the next chapter with the first service.
 
-None of this is load-bearing yet. The point is that you have a home for each kind of thing you'll create, so when a later chapter says "add the Spark service" or "initialize the pipeline project," you already know where it goes. We'll create the actual `docker-compose.yml` in the next chapter, when there's a first service to put in it.
+Make `lakehouse` an installable package so `import lakehouse` works from anywhere, your DAGs, your training scripts, an interactive shell. Create a `pyproject.toml` at the root:
+
+```toml
+[project]
+name = "lakehouse"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["pyspark==4.1.0"]   # the Spark Connect client; chapters add extras as needed
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["lakehouse"]
+```
+
+Then install it in editable mode, so the package is importable and your edits are picked up live without reinstalling:
+
+```bash
+pip install -e .
+```
+
+That editable install is the small move that makes everything downstream cohere: once `lakehouse` is on your path, every chapter's code (and your DAGs, and your tests) imports the same functions instead of re-pasting them. We'll create the actual `docker-compose.yml` in the next chapter, when there's a first service to put in it.
 
 ![The project layout and what each folder holds](../figures/ch02/fig-2.5-project-layout.svg)
 
@@ -168,7 +196,7 @@ If that command failed, the usual causes are: Docker isn't running (start Docker
 You're ready to move on when:
 
 - Docker, Compose, Python, Git, and the AWS CLI are installed and their version commands all work.
-- You have a project directory under version control, with the `compose/`, `config/`, `pipelines/`, and `data/` folders laid out.
+- You have a project directory under version control, laid out with the `lakehouse/` package plus `config/`, `pipelines/`, `dags/`, `ml/`, `data/`, and `tests/`, and `pip install -e .` succeeds so `import lakehouse` works.
 - Your first commit is a `.gitignore` that excludes `.env` and `data/`, and you understand why secrets stay out of version control.
 - `docker run hello-world` printed the welcome message, confirming Docker can pull and run a container.
 
@@ -190,7 +218,7 @@ You're ready to move on when:
 - The only tools on your host are **Docker (with Compose), Python, Git, and the AWS CLI**; everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
 - Services run as **containers defined in a Compose file**, which is your infrastructure written down: readable, versioned, reproducible.
 - Secrets live in a gitignored **`.env`**, and keeping them out of version control is the first habit you commit.
-- You confirmed Docker can pull and run a container, and laid out a project directory ready for its first real service.
+- You confirmed Docker can pull and run a container, and laid out an installable `lakehouse` project ready for its first real service and its first shared module.
 - **Next, Chapter 3, Storage:** create your first real service, an S3-compatible object store, in the `docker-compose.yml` you'll start for real, and set up the warehouse it holds.
 
 ![Progress: Setup complete, Storage next](../figures/ch02/fig-2.7-progress-setup-done.svg)

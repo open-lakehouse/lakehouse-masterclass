@@ -48,7 +48,34 @@ When your documentation is consistent and complete enough that an agent can foll
 
 ## Build: have an agent run the lakehouse
 
-**Step 1: point a coding agent at the repo.** A coding agent (Claude Code, Cursor, or similar) onboards by reading the project's README, the `docker-compose.yml`, and any `AGENTS.md` you've written, the same files a human would read first. No special integration is required; the agent learns the system by reading its docs.
+**Step 1: point a coding agent at the repo, and give it an `AGENTS.md`.** A coding agent (Claude Code, Cursor, or similar) onboards by reading the project's README, the `docker-compose.yml`, and an `AGENTS.md` if one exists, the same files a human would read first. No special integration is required; the agent learns the system by reading its docs. The one artifact worth writing for this is `AGENTS.md`: a short operator's guide that spells out the interfaces and the limits. Create it at the repo root:
+
+```markdown
+# AGENTS.md: operating the lakehouse
+
+## Services (all on the `lakehouse-network` Docker network)
+- seaweedfs       object store, S3 API   host: localhost:8333  in-net: seaweedfs:8333
+- spark-connect   Spark Connect (gRPC)   host: localhost:15002 in-net: spark-connect:15002
+- unity-catalog   Iceberg REST catalog   host: localhost:8081
+- (airflow, mlflow) orchestration + model tracking, when running
+
+## How to operate
+- Lifecycle:  `docker compose up -d <svc>` / `docker compose ps` / `docker compose down`
+- Generate + ingest Bronze:  `python -m lakehouse.generate` then `python -m lakehouse.ingest <YYYY-MM-DD>`
+- Run the batch pipeline:  `cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002`
+- Train the model:  `python ml/train.py`
+- Run the tests:  `pytest tests/`
+- Query data:  SQL over Spark Connect at `sc://localhost:15002`; tables are `iceberg.bronze.*`, `iceberg.silver.*`, `iceberg.gold.*`
+- Shortcuts for all of the above live in the `Makefile` (`make up`, `make ingest`, `make pipeline`, `make test`, `make down`)
+
+## Guardrails (do NOT violate without explicit human confirmation)
+- Never run `docker compose down -v` (deletes all data volumes).
+- Never `DROP TABLE` or delete a stream checkpoint.
+- Prefer read-only SQL (`SELECT`); confirm before any write or DDL.
+- Always `docker compose ps` to check health before and after lifecycle changes.
+```
+
+This file is the agent's API. Everything in it, service names, ports, the pipeline command, the catalog's table names, is something you built and verified in earlier chapters; you're just writing it down where an agent (or a new teammate) will read it first.
 
 **Step 2: give it a plain-English goal.**
 
@@ -70,6 +97,14 @@ agent -> "Here's daily revenue by status: ..."                        # reports 
 Expected: the agent brings the stack up, runs the pipeline you built in Chapter 7, reads the Gold table through the catalog, and summarizes the numbers, all from one English instruction, using only the tools you already have.
 
 **What just happened?** Trace what the agent did against the loop. It planned a sequence (bring up storage, compute, and catalog; verify; run the pipeline; read results). It acted by calling the exact commands you've typed all course. It observed, notice the `docker compose ps` call, where it checks health before proceeding rather than assuming success. And it reported back in plain language. Every tool it used is one you've used; the agent added planning and adaptation on top of the interfaces you already built.
+
+Then verify it, because trusting an agent blindly is the whole danger. Run the agent's final query yourself and confirm the numbers match what it reported:
+
+```python
+spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
+```
+
+The rows should be exactly what the agent summarized. This is the habit to keep even once agents are doing the work: the lakehouse gives you an independent way to check the agent's claim (the same catalog, the same table), so the agent is a fast operator you can audit, not an oracle you have to believe.
 
 **Step 4: try a follow-up that requires adaptation,** for example "now tear it all down cleanly." The agent runs `docker compose down`, checking `docker compose ps` before and after, planning and verifying, not just firing commands.
 
