@@ -121,6 +121,17 @@ Expected: the model shows up in the MLflow Models tab as a named, versioned entr
 
 **What just happened?** You promoted a run's model into the registry, a named, versioned home for models you might actually use. This is the difference between "a model file somewhere" and "version 3 of `orders-order-count`, which we can promote to production or roll back." The registry is to models what the catalog is to tables: the one authoritative, versioned source of truth.
 
+**Step 3b: load the registered model back and use it.** A registered model is only worth something if you can pull it out and run it. Fetch the exact version you just registered and predict:
+
+```python
+import mlflow.sklearn
+
+model = mlflow.sklearn.load_model(f"models:/orders-order-count/{result.version}")
+print(model.predict([[40000.0]]))   # predicted order_count at $40k revenue, e.g. [531.2]
+```
+
+Expected: a predicted `order_count` for a day with \$40,000 of revenue. The number is uninteresting (it's a toy model); what matters is the round-trip, you loaded a model *by name and version* from the registry and ran it, with no file paths, no "which .pkl was it," no guesswork. That is exactly how a serving job or batch-scoring pipeline would load it in production: `models:/orders-order-count/<version>`, the model as an addressable, versioned artifact.
+
 **Step 4: compare runs.** Train again with a tweak (a different feature, say) and view both runs side by side in the UI, sorted by `r2`. This is why tracking exists: objective comparison instead of guesswork.
 
 **What just happened?** You just experienced the entire point of experiment tracking. Two runs, side by side, sorted by score: you can see which was better instead of guessing. Scale that from two runs to two hundred and you understand why no serious ML team works without tracking. The best run isn't the one you remember; it's the one the data says is best.
