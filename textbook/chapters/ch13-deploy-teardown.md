@@ -36,6 +36,28 @@ Taking this to the cloud doesn't change the architecture, only who runs the boxe
 - **Self-hosted on cloud:** the same open components, just on cloud infrastructure. Spark on ECS or EMR, object storage on S3, the catalog's Postgres on RDS. You still run the open stack; the cloud provides the machines.
 - **Fully managed:** a platform like Databricks runs Spark, the catalog, and the pipelines for you. Your Iceberg tables and SDP/Spark code still port over, because they're open.
 
+To make "declare the infrastructure" concrete, here is the *shape* of the self-hosted-on-cloud path in Terraform. This is illustrative, not something you apply in this course (that would mean a cloud account and a bill); read it for the mapping from each local service to its cloud counterpart:
+
+```hcl
+# ILLUSTRATIVE ONLY: the shape of a cloud deployment, not a deployment to run.
+
+resource "aws_s3_bucket" "lakehouse" {
+  bucket = "my-org-lakehouse"            # replaces local SeaweedFS (same S3 API)
+}
+
+resource "aws_db_instance" "catalog" {
+  engine         = "postgres"            # the catalog's metadata DB, now managed
+  instance_class = "db.t3.micro"
+}
+
+# Spark would run on EMR or ECS; Unity Catalog on a small instance or managed host.
+# Your Iceberg tables, SDP definitions, and Spark code do not change: only the
+# endpoints and credentials in your config point at these cloud resources instead
+# of localhost. That is the whole "lift, not rewrite" claim, in a config file.
+```
+
+Notice what is *not* in that file: any change to your pipeline logic or table definitions. You swap `localhost:8333` for the S3 bucket's endpoint and `seaweedfs`'s keys for IAM, and the stack you built runs unchanged.
+
 > **Infrastructure as code** means the deployment is declared in Terraform and applied reproducibly, the same declarative philosophy you saw in SDP (Chapter 7) and Airflow DAGs (Chapter 9): describe the desired state, let the tool converge to it.
 
 Notice the pattern repeating one more time: declarative shows up at every layer of this course. SDP declares tables and lets the engine derive the build order. Airflow declares task dependencies and derives the run order. Terraform declares cloud infrastructure and derives the steps to create it. Once you internalize "describe the desired end state, let the tool figure out how to get there," you have a mental model that transfers across the entire modern data and infrastructure stack. It's arguably the single most portable idea in the whole book.
@@ -56,6 +78,18 @@ docker compose ps
 Expected: all services stop and the containers are removed; `docker compose ps` shows nothing running. Your data volumes (`seaweedfs-data`, the catalog's Postgres, etc.) remain, so a later `docker compose up -d` resumes where you left off.
 
 **What just happened?** `docker compose down` is the gentle option: it halts and removes the running services but leaves your data volumes intact. Think of it as closing the shop for the night, not demolishing it. When you come back and `docker compose up -d`, your Iceberg tables, catalog entries, and everything else are exactly where you left them. This is the command for "I'm done for today," not "I'm done forever."
+
+Prove it, don't trust it. Bring the stack back up and confirm your Gold table survived the full stop/start:
+
+```bash
+docker compose up -d
+# wait for the catalog and Spark to be healthy, then:
+python3 -c "from pyspark.sql import SparkSession; \
+s = SparkSession.builder.remote('sc://localhost:15002').getOrCreate(); \
+print(s.table('iceberg.gold.daily_revenue').count(), 'Gold rows survived')"
+```
+
+Expected: the same row count you had before the teardown. The containers were destroyed and recreated, but the data lived in named volumes, not in the containers, so it is exactly where you left it. That separation of compute (ephemeral containers) from storage (durable volumes) is the same decoupling principle from Chapter 1, now visible in your teardown habit.
 
 **Step 2: full reset, only if you want a clean slate (this wipes data).** The `-v` flag removes the named volumes too:
 
