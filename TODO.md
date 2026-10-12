@@ -96,3 +96,24 @@ should confirm each on a real >=16GB / Docker host and correct any that differ:
 - Ch12: an agent can operate the stack from the AGENTS.md; verify-the-agent query matches.
 - Ch13: data survives `docker compose down` + `up -d` (Gold count unchanged); the
   Terraform snippet is illustrative only (not meant to apply).
+
+## Code re-architecture, 2026-10-12 (one installable `lakehouse` package) -- VERIFY
+The course now builds ONE project, not per-chapter snippets. Verify on a real host:
+- `pip install -e .` works (pyproject.toml, Ch2); `import lakehouse` resolves everywhere.
+- Ch4: lakehouse/config.py (SPARK_REMOTE, CATALOG) + session.py get_spark(); every
+  chapter from 5 on opens its session via `from lakehouse.session import get_spark`.
+- Ch6: lakehouse/generate.py (`python -m lakehouse.generate`) and lakehouse/ingest.py
+  (`python -m lakehouse.ingest 2026-01-05`), ingest is date-parameterized + idempotent.
+  config.py gains RAW_PREFIX here.
+- Ch7: lakehouse/quality.py clean_orders() called by the SDP Silver; tests/test_quality.py
+  runs under `pytest` (needs Connect up -- it's an integration test).
+- Ch8: producer is now lakehouse/stream_source.py (`python -m lakehouse.stream_source`).
+- Ch9: dags/medallion.py does `from lakehouse.ingest import ingest_orders` and passes
+  ctx["ds"]; the Airflow image must `pip install -e .` the project AND set
+  SPARK_REMOTE=sc://spark-connect:15002 so get_spark() reaches the in-network server.
+  CONFIRM: the lakehouse package + pipelines dir are mounted/installed in the Airflow image.
+- Ch11: ml/train.py (`python ml/train.py`), uses get_spark().
+- Ch13: Makefile targets (up/down/ps/ingest/pipeline/test) and the final repo tree are
+  the intended end-state layout; confirm the tree matches what a reader actually ends with.
+- CONFIRM env-var contract end to end: SPARK_REMOTE, LAKEHOUSE_CATALOG, RAW_PREFIX
+  resolve correctly from host (localhost) vs in-container (service names).
