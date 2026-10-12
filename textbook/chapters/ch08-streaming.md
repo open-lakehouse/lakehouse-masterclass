@@ -194,17 +194,32 @@ query.awaitTermination()   # long-running: this job doesn't "finish"
 
 **What just happened?** This is the train-in-the-tunnel scenario handled in a few lines. `withWatermark("created_at", "10 minutes")` sets the kitchen's closing time, accept events up to 10 minutes late. `dropDuplicatesWithinWatermark(["order_id"])` lands each `order_id` exactly once even if the producer sent it three times. Then you shape the rows to match the Bronze table the batch job created in Chapter 6, the same `_ingested_at` / `_source` / `_ingest_date` metadata columns, with `created_at` kept as a string, so the schema lines up. And `toTable("iceberg.bronze.orders_raw")` writes to the same Bronze table; streaming is a different how, same destination. Finally, `awaitTermination()` reflects that this job never finishes; it runs until you stop it. (`F` here is `pyspark.sql.functions`, imported in Step 3.)
 
-**Step 5: from another client, watch the Bronze count climb as events flow.**
+**Step 5: from another client, watch the Bronze count climb as events flow.** Open a second Python session (leave the streaming job and the producer running) and run the count a few times, a few seconds apart:
 
 ```python
-spark.table("iceberg.bronze.orders_raw").count()   # run repeatedly, it grows
+spark.table("iceberg.bronze.orders_raw").count()
+#   1000   <- the batch rows you loaded in Chapter 6
+#   1037   <- a few seconds later: streamed events have landed
+#   1092   <- and climbing, ~5/sec from the producer
 ```
 
-**What just happened?** Running that count repeatedly and watching it climb is your proof that the stream is live: events are flowing from the producer, through Kafka, through your Structured Streaming job, into Iceberg, in near-real-time. That growing number is the whole chapter working end to end.
+**What just happened?** Two things, and the second is the real lesson. First, the number climbs, proof the stream is live: events flow from the producer, through Kafka, through your Structured Streaming job, into Iceberg, in near-real-time. Second, look at where it *started*: `1000`, the exact batch rows from Chapter 6. The stream is appending into the **same** `iceberg.bronze.orders_raw` table the batch job wrote. That is the convergence argument from the chapter intro made physical: one Bronze table, fed by both a scheduled batch job and a continuous stream, and a downstream reader can't tell which rows arrived which way. One stack, not two.
 
 ## Why the checkpoint matters
 
 The `checkpointLocation` is what makes a streaming job restartable and idempotent across failures: it durably records which Kafka offsets have been processed and the watermark state. Kill the job and restart it, and it resumes from the last committed offset; it will not skip events or double-write them. Delete the checkpoint and it starts over. Treat the checkpoint as part of your data: one checkpoint per streaming query, never shared.
+
+Don't take that on faith either, look at what the checkpoint wrote. List its location in the bucket while the stream runs:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/_checkpoints/bronze_orders_stream/
+# .../offsets/0        <- the Kafka offsets read up to each micro-batch
+# .../commits/0        <- which micro-batches committed successfully
+# .../metadata         <- the stream's identity
+# .../state/0/...      <- the watermark + dedup state (dropDuplicatesWithinWatermark)
+```
+
+Those four things *are* the stream's memory. `offsets/` is the bookmark into Kafka ("I've read up to here"); `commits/` records which batches finished; `state/` holds the in-flight watermark and the set of recently-seen `order_id`s used for dedup. On restart, Spark reads `offsets/` and `commits/` to find exactly where it left off and `state/` to restore the dedup window, which is precisely why a restart neither skips nor double-writes. Delete this directory and all of that memory is gone, so the next start reads the topic from scratch.
 
 This is the streaming equivalent of the idempotency you built in Chapter 6, and it matters for the same reason: things fail, and recovery must be safe. A batch job retries by re-running a bounded chunk. A streaming job can't "re-run", it never stopped, so instead it remembers its exact position (the Kafka offsets) and its in-flight state (the watermark) in the checkpoint. On restart, it reads that bookmark and continues precisely where it left off. Without the checkpoint, a restart would either re-process events (duplicates) or skip them (data loss). The checkpoint is what turns a fragile long-running process into a reliable one. Never point two different queries at the same checkpoint location, and never delete it unless you truly mean "start this stream over from scratch."
 
