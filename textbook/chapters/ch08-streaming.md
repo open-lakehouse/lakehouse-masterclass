@@ -98,7 +98,7 @@ docker compose ps
 
 **What just happened?** You started Kafka, the durable pipe between a source and your streaming job. The dual-listener setup is the Chapter 2 networking lesson again: `kafka:9092` is the address inside the Compose network (what Spark will use), `localhost:29092` is the published address for clients on your host (what the producer below will use). Mixing these up is the single most common Kafka-on-Docker mistake.
 
-**Step 2: produce a live stream of order events.** In production this would be your application emitting events. To keep it self-contained, write a small producer, `pipelines/stream_orders.py`, that publishes order events to the `orders` topic from your host. Install the client first:
+**Step 2: produce a live stream of order events.** In production this would be your application emitting events. To keep it self-contained, add a small producer module, `lakehouse/stream_source.py`, that publishes order events to the `orders` topic from your host (the streaming counterpart to the batch `generate.py`). Install the client first:
 
 ```bash
 pip install kafka-python
@@ -115,25 +115,30 @@ producer = KafkaProducer(
 )
 
 statuses = ["placed", "shipped", "cancelled", "placed", "placed"]
-i = 0
-while True:
-    i += 1
-    event = {
-        "order_id": f"o-{20000 + i}",
-        "customer_id": f"c-{random.randint(1, 200)}",
-        "amount": round(random.uniform(5, 500), 2),
-        "status": random.choice(statuses),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    producer.send("orders", event)
-    print("sent", event["order_id"])
-    time.sleep(0.2)   # ~5 events/sec
+
+def produce(rate_per_sec: float = 5.0):
+    i = 0
+    while True:
+        i += 1
+        event = {
+            "order_id": f"o-{20000 + i}",
+            "customer_id": f"c-{random.randint(1, 200)}",
+            "amount": round(random.uniform(5, 500), 2),
+            "status": random.choice(statuses),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        producer.send("orders", event)
+        print("sent", event["order_id"])
+        time.sleep(1.0 / rate_per_sec)
+
+if __name__ == "__main__":
+    produce()
 ```
 
 Run it in its own terminal and leave it running:
 
 ```bash
-python3 pipelines/stream_orders.py
+python -m lakehouse.stream_source
 ```
 
 **What just happened?** The producer publishes an order event roughly every 200 ms into the `orders` topic. Kafka durably holds those events, so if your streaming consumer is down for a while, the events wait for it rather than being lost. The producer connects on `localhost:29092` because it runs on your host, outside the Compose network.

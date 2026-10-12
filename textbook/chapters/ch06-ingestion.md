@@ -208,7 +208,7 @@ Batch is the right default for most ingestion and the easiest to reason about, p
 
 ## Checkpoint
 
-- `generate_orders.py` wrote raw order records to `s3a://lakehouse/raw/orders/`.
+- `lakehouse/generate.py` wrote raw order records to `s3a://lakehouse/raw/orders/`.
 - You ingested the raw orders into `iceberg.bronze.orders_raw` over `sc://`, adding `_ingested_at`, `_source`, and `_ingest_date` metadata.
 - The Bronze table is partitioned by `_ingest_date`.
 - Running the write twice left the row count unchanged: the ingest is idempotent.
