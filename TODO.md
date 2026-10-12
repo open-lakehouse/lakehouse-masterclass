@@ -70,3 +70,29 @@ APPLIED 2026-10-11 (source-level, still not runtime-verified; confirm on first >
 (All source-level verification items now applied. Remaining work is a true runtime
 run on a >=16GB / Docker-capable host, and swapping in the official UC 0.7 image
 when it publishes.)
+
+## Hands-on deepening pass, 2026-10-12 (Ch3-13) -- VERIFY THESE ON A REAL RUN
+The build sections were deepened with complete artifacts, see-it-change inspection,
+and real expected output. The following illustrative values/paths are NOT runtime-
+verified (sandbox can't run Docker; Spark+Iceberg OOMs here). A verification session
+should confirm each on a real >=16GB / Docker host and correct any that differ:
+- Ch3: `docker compose ps` columns; `s3 mb`/`cp`/`ls` output text; recursive-listing
+  key layout (object keys, no folder objects).
+- Ch4: `docker compose ps` 4-service table; Spark master UI labels (Workers ALIVE,
+  "Spark Connect server" running application); `spark.version` -> 4.1.0; the
+  2M-row groupBy appearing as a job in the UI.
+- Ch5: the EXACT object-storage layout of an Iceberg table (data/ Parquet +
+  metadata/ metadata.json + snap-*.avro + *.avro), the metadata.json JSON shape,
+  and that a 2nd insert adds a new metadata.json/snap/manifest while old ones remain.
+- Ch6: `generate_orders.py` output; raw drop = part-*.json + _SUCCESS; Bronze count
+  1000 then 1000 (idempotent); physical partition dir `_ingest_date=2026-01-05/`.
+- Ch7: Bronze (~1000) vs Silver (fewer) counts; the "zero bad rows in Silver" query
+  returns empty; Gold output shape.
+- Ch8: Bronze count starts at 1000 (batch) and climbs (stream); checkpoint dir holds
+  offsets/ commits/ metadata state/.
+- Ch9: the filled-in `ingest_bronze` task runs; `airflow dags list-runs` state=success.
+- Ch10: DuckDB output rows byte-for-byte match Spark's Gold rows.
+- Ch11: `models:/orders-order-count/<version>` loads and `.predict()` returns a value.
+- Ch12: an agent can operate the stack from the AGENTS.md; verify-the-agent query matches.
+- Ch13: data survives `docker compose down` + `up -d` (Gold count unchanged); the
+  Terraform snippet is illustrative only (not meant to apply).
