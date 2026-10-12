@@ -87,7 +87,11 @@ The `catalog` is the Unity Catalog OSS catalog you built in Chapter 5. `storage`
 
 ```python
 from pyspark import pipelines as dp
-from pyspark.sql import functions as F
+from pyspark.sql import SparkSession, functions as F
+
+# SDP loads this file directly, so bind the active session explicitly;
+# nothing injects `spark` into a transformations module for you.
+spark = SparkSession.active()
 
 
 # SILVER: clean and conform the raw Bronze orders.
@@ -137,15 +141,16 @@ spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
 spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
 ```
 
-Expected output (shape):
+Expected output: a small table of `order_date`, `status`, `revenue`, `order_count`. The exact numbers depend on the randomly generated Bronze data from Chapter 6 (around 1000 orders across several statuses), so yours will differ; the shape is what matters:
 
 ```
-+----------+---------+-------+-----------+
-|order_date|   status|revenue|order_count|
-+----------+---------+-------+-----------+
-|2026-01-05|cancelled|   88.0|          1|
-|2026-01-05|   placed|  117.7|          3|
-+----------+---------+-------+-----------+
++----------+---------+--------+-----------+
+|order_date|   status| revenue|order_count|
++----------+---------+--------+-----------+
+|2026-01-05|cancelled| 4821.17|         63|
+|2026-01-05|   placed|41235.90|        548|
+|2026-01-05|  shipped| 9977.42|        131|
++----------+---------+--------+-----------+
 ```
 
 **What just happened?** You're reading a business-ready table: daily revenue and order counts by status. Trace its lineage in your head. These numbers came from Silver (clean, deduplicated orders), which came from Bronze (the raw landing), which came from the generator standing in for a source system. That full path, from raw event to business metric, is the entire data engineering flow in miniature, and you built it declaratively.
@@ -173,7 +178,8 @@ The instinct to reach for is: fail loud on things that must never happen; drop o
 
 - **SDP reports a cycle or can't resolve the graph.** Two datasets read each other, or a function reads a table that isn't declared and doesn't exist. Check that every table you read either exists (like Bronze) or is declared in the pipeline.
 - **A dataset materializes empty.** Often an over-strict filter removed every row, or the upstream table was empty. Check your filter conditions and confirm Bronze actually has data.
-- **`ModuleNotFoundError: pyspark.pipelines` or `spark-pipelines: command not found`.** The pipelines extra isn't installed, or you're on a Spark older than 4.1. Run `pip install 'pyspark[pipelines]'` and confirm your version.
+- **`ModuleNotFoundError: pyspark.pipelines` or `spark-pipelines: command not found`.** The pipelines extra isn't installed, or you're on a Spark older than 4.1. Run `pip install 'pyspark[pipelines]==4.1.0'` (pin the version to match your 4.1 Connect server, since a bare `pip install pyspark` now pulls a newer release) and confirm your version.
+- **`spark-pipelines` fails to launch with a Java error.** The CLI starts a JVM under the hood (via `spark-class`), so it needs a JDK (Java 17+) on your host, even though Spark itself runs in a container. This is the one host tool in the course that needs Java; install a JDK if you don't have one.
 - **Connect-style error during run.** SDP runs on Spark Connect, so failures surface as Connect errors; read the last line, as in Chapter 4. Confirm `--remote sc://localhost:15002` points at your running Connect server.
 - **Tables land in the wrong catalog or schema.** Check `catalog:` in `spark-pipeline.yml` and the schema-qualified `name=` on each dataset (`silver.orders`, `gold.daily_revenue`).
 

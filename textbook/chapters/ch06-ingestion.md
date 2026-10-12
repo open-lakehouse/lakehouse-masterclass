@@ -2,6 +2,8 @@
 
 This is the first data flow, and a turning point in the course. You have storage (Chapter 3), compute (Chapter 4), and real tables (Chapter 5). Now you get data into them. You'll generate realistic order data, stand in for a source system, and ingest it as-is into a Bronze table: the raw, faithful landing zone that every later transformation builds on. Along the way you'll meet the ingestion vocabulary a practitioner uses every day, batch, ELT, and idempotency, and see why "land raw first" is the modern default.
 
+Chapter 5's `bronze.orders` was a hands-on scratch table for learning Iceberg's mechanics (inserts, schema evolution, time travel, deliberately breaking it and rolling back). Here you build the pipeline's real Bronze table, `bronze.orders_raw`, the one Chapter 7 transforms into Silver and Gold and Chapter 8 streams into. From here on, `orders_raw` is the Bronze table that matters.
+
 Everything before this was infrastructure: places to put data and engines to act on it. From here on, you're moving actual data through the system. Ingestion is where the lakehouse stops being a set of empty rooms and starts being a working home for your data. And the single most important habit you'll build here, landing raw data faithfully before touching it, is the one that separates engineers who sleep well from engineers who get paged.
 
 ![Progress: Ingestion](../figures/ch06/fig-6.1-progress-ingestion.svg)
