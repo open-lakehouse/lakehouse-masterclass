@@ -78,7 +78,7 @@ curl -s http://localhost:5000/health
 
 **What just happened?** You started the MLflow tracking server, the service that records every training run and stores registered models. The UI on `http://localhost:5000` is where model work becomes visible and comparable, the same way the Airflow UI made orchestration visible. Keep it open as you train; watching runs appear is how the tracking concept becomes concrete.
 
-**Step 2: read Gold as training data over Spark Connect, then train and log with MLflow.** You run this from your host, so it reaches Spark Connect at `sc://localhost:15002` and MLflow at `http://localhost:5000`. We fit a small model that predicts order count from revenue, trivial on purpose; the workflow is the lesson.
+**Step 2: read Gold as training data over Spark Connect, then train and log with MLflow.** Put this in `ml/train.py` (the training lives in the repo like everything else, not in a scratch notebook). It reuses the project's `get_spark()` factory, so it reaches Spark the same way every other module does; it reaches MLflow at `http://localhost:5000`. We fit a small model that predicts order count from revenue, trivial on purpose; the workflow is the lesson. Run it with `python ml/train.py` once it's written.
 
 ```python
 import mlflow, mlflow.sklearn

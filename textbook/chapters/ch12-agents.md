@@ -61,8 +61,12 @@ When your documentation is consistent and complete enough that an agent can foll
 
 ## How to operate
 - Lifecycle:  `docker compose up -d <svc>` / `docker compose ps` / `docker compose down`
+- Generate + ingest Bronze:  `python -m lakehouse.generate` then `python -m lakehouse.ingest <YYYY-MM-DD>`
 - Run the batch pipeline:  `cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002`
+- Train the model:  `python ml/train.py`
+- Run the tests:  `pytest tests/`
 - Query data:  SQL over Spark Connect at `sc://localhost:15002`; tables are `iceberg.bronze.*`, `iceberg.silver.*`, `iceberg.gold.*`
+- Shortcuts for all of the above live in the `Makefile` (`make up`, `make ingest`, `make pipeline`, `make test`, `make down`)
 
 ## Guardrails (do NOT violate without explicit human confirmation)
 - Never run `docker compose down -v` (deletes all data volumes).
