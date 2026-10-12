@@ -50,7 +50,7 @@ Airflow is the most involved service in the stack: it's really several processes
 1. **Join the same network.** Put the Airflow services on `lakehouse-network` so their tasks can reach `spark-connect:15002`, `seaweedfs:8333`, and `unity-catalog:8080` by service name.
 2. **Mount your DAGs folder.** Point Airflow's `dags/` volume at a `dags/` directory in your project so your DAG file is picked up.
 3. **Keep it small for local use.** `AIRFLOW__CORE__EXECUTOR=LocalExecutor` and `AIRFLOW__CORE__LOAD_EXAMPLES=false` keep the footprint sane on a laptop. The API/web UI comes up on port 8085.
-4. **Give the tasks what they call.** The DAG below runs `spark-pipelines` and talks to Spark Connect from inside the Airflow container, so that image needs the client installed (`pip install 'pyspark[pipelines]==4.1.0'`, via a custom Airflow image or `_PIP_ADDITIONAL_REQUIREMENTS`) and your `pipelines/` directory mounted (for example at `/opt/pipelines`) so the SDP project is on disk where the task's working directory expects it.
+4. **Give the tasks what they call.** The DAG imports `lakehouse.ingest`, runs `spark-pipelines`, and talks to Spark Connect, all from inside the Airflow container, so that image needs three things: the client and pipelines extra installed (`pip install 'pyspark[pipelines]==4.1.0'`), your `lakehouse` package installed (`pip install -e .` against the mounted project, so `from lakehouse.ingest import ingest_orders` resolves), and your `pipelines/` directory mounted (for example at `/opt/pipelines`) so the SDP project is on disk where the task's working directory expects it. Set `_PIP_ADDITIONAL_REQUIREMENTS` or bake a custom Airflow image for the installs. Finally, set `SPARK_REMOTE=sc://spark-connect:15002` in the Airflow services' environment: that is the one env var `get_spark()` reads, so the reused Chapter 6 ingest reaches the in-network Connect server with no code change. (That is the whole point of centralizing the address in config: the identical function runs from your host and from inside Airflow, differing only by one env var.)
 
 Bring up the Airflow services and confirm the UI answers:
 
@@ -69,29 +69,23 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 
+from lakehouse.ingest import ingest_orders   # the SAME module you wrote in Chapter 6
+
 default_args = {
     "retries": 2,                          # transient failures auto-retry
     "retry_delay": timedelta(minutes=5),
 }
 
-CONNECT = "sc://spark-connect:15002"       # in-network address, not localhost
-
-def ingest_bronze(**_):
-    # the batch ingest from Chapter 6, pointed at the in-network Connect server
-    from pyspark.sql import SparkSession, functions as F
-    spark = SparkSession.builder.remote(CONNECT).getOrCreate()
-    raw = spark.read.json("s3a://lakehouse/raw/orders/")
-    bronze = (raw
-        .withColumn("_ingested_at", F.current_timestamp())
-        .withColumn("_source",      F.lit("orders-generator"))
-        .withColumn("_ingest_date", F.to_date(F.current_timestamp())))
-    bronze.writeTo("iceberg.bronze.orders_raw").overwritePartitions()  # idempotent
+def ingest_bronze(**ctx):
+    # Reuse the Chapter 6 ingest, passing the run's logical date (ds). Backfilling
+    # a past day lands that day's partition. No pipeline logic is re-implemented here.
+    ingest_orders(ingest_date=ctx["ds"])
 
 def build_silver_gold(**_):
-    # run the SDP medallion from Chapter 7 against the Connect server
+    # run the SDP medallion from Chapter 7 against the in-network Connect server
     import subprocess
     subprocess.run(
-        ["spark-pipelines", "run", "--remote", CONNECT],
+        ["spark-pipelines", "run", "--remote", "sc://spark-connect:15002"],
         cwd="/opt/pipelines/medallion", check=True,
     )
 
@@ -108,7 +102,7 @@ with DAG(
     t_bronze >> t_silver_gold               # the dependency edge = the DAG
 ```
 
-**What just happened?** The last line is the heart of it: `t_bronze >> t_silver_gold` literally draws the arrow of the DAG, "Bronze before the medallion transform." That `>>` operator is how Airflow expresses dependencies. Notice also `catchup=False`: without it, deploying a DAG with a `start_date` in the past would make Airflow immediately try to run every missed day since that date, a classic surprise that floods a new pipeline with hundreds of runs. And each task function is deliberately thin: it calls the pipeline work you already built (the Chapter 6 ingest, the Chapter 7 SDP run), honoring the "conductor, not musician" principle. SDP still derives the Silver-then-Gold order internally, so Airflow only needs to sequence "ingest, then transform."
+**What just happened?** The last line is the heart of it: `t_bronze >> t_silver_gold` literally draws the arrow of the DAG, "Bronze before the medallion transform." That `>>` operator is how Airflow expresses dependencies. Notice also `catchup=False`: without it, deploying a DAG with a `start_date` in the past would make Airflow immediately try to run every missed day since that date, a classic surprise that floods a new pipeline with hundreds of runs. And each task function is deliberately thin: `ingest_bronze` is one line that `import`s and calls the exact `ingest_orders` function you wrote in Chapter 6, not a copy of it, and `build_silver_gold` shells out to the Chapter 7 SDP project. This is the "conductor, not musician" principle made literal: the orchestrator sequences work it doesn't itself implement. Because the ingest is reused rather than reimplemented, there is one definition of "land Bronze" in the whole system; fix a bug in `lakehouse/ingest.py` and both your manual runs and the scheduled runs get the fix. And passing `ctx["ds"]` (the run's logical date) into that function is what makes the retries and backfills below actually correct. SDP still derives the Silver-then-Gold order internally, so Airflow only needs to sequence "ingest, then transform."
 
 **Step 3: trigger a run and watch the tasks go green in order.** From the UI's trigger button, or from the CLI inside the scheduler container:
 
