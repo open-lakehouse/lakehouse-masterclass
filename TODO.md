@@ -68,12 +68,9 @@ Also added and runtime-verified during this pass:
      resolution on that type, so `.snapshots`, `.files`, `.history` are unusable from
      Spark. With authorization on it fails earlier, while resolving securables.
      Fix: the Iceberg routes' exception handler reports SCHEMA_NOT_FOUND as
-     TABLE_NOT_FOUND on table-scoped routes. Tests pass (58 Iceberg/handler tests,
-     including a new auth-on case), and a patched image made `.snapshots`, `.files`
-     and `.history` work from Spark end to end. Drafts (issue, PR body, push steps):
-     `~/spark-contributor/drafts/OPP-2026-10-12-UC-IRC-METADATA-TABLES`; branch
-     `fix/irc-loadtable-missing-namespace` in `~/repos/unitycatalog-irc-fix` (needs a
-     DCO sign-off before pushing). Workarounds in the course meanwhile:
+     TABLE_NOT_FOUND on table-scoped routes. It is prepared for upstream with tests (one
+     with authorization on), and a patched image made `.snapshots`, `.files`
+     and `.history` work from Spark end to end. Workarounds in the course meanwhile:
      `SHOW TBLPROPERTIES ... ('current-snapshot-id')`, the `_file` column, and
      `lakehouse/catalog.py` (keep that one as a teaching tool). When a UC release
      carries the fix, restore the metadata-table queries in Chapters 5 and 11.
@@ -84,11 +81,9 @@ Also added and runtime-verified during this pass:
      the catalog table, so SDP treats it as external: on every run after the first,
      both flows start together and the downstream one reads a just-truncated table
      (Gold empty, run "COMPLETED"). Reproduces without Iceberg (session catalog,
-     Parquet). `drop`, `na.fill` and other eager transforms fail outright. Fix drafted
-     in `~/repos/spark-sdp-eager` (branch `sdp-connect-eager-analysis`): pipeline flow
-     plans are converted with eager analysis deferred, plus a PythonPipelineSuite test that
-     fails without the fix; 319 tests in the pipelines, planner and session suites pass.
-     JIRA draft and standalone repro: `~/spark-contributor/drafts/OPP-2026-10-12-SDP-CONNECT-EAGER-ANALYSIS`.
+     Parquet). `drop`, `na.fill` and other eager transforms fail outright. A fix is
+     prepared for upstream: pipeline flow plans are converted with eager analysis
+     deferred, with a PythonPipelineSuite test that fails without it.
      Course workaround (not a hack, a real rule until the fix ships): Gold shapes its
      columns with `select`, not `withColumn`, so the single `spark-pipelines run` is
      correct on every run (verified across repeated runs and in Airflow). Chapter 7
