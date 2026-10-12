@@ -153,6 +153,23 @@ Expected output: a small table of `order_date`, `status`, `revenue`, `order_coun
 +----------+---------+--------+-----------+
 ```
 
+**Step 6: see the cleaning actually happen.** The quality filters aren't theoretical, they removed rows. Compare the counts across the three tiers:
+
+```python
+spark.table("iceberg.bronze.orders_raw").count()  # ~1000: everything, warts and all
+spark.table("iceberg.silver.orders").count()      # fewer: nulls, bad amounts, dupes dropped
+# the shrinkage IS the data-quality work, made visible
+```
+
+Expected: Silver has visibly fewer rows than Bronze. Chapter 6's generator deliberately injected null `order_id`s, negative `amount`s, and the odd duplicate; the three `.filter`/`.dropDuplicates` lines in `silver_orders` dropped exactly those. The gap between the Bronze and Silver counts is the amount of bad data you kept out of Gold. Spot-check it directly, this should return zero rows, because Silver is clean by construction:
+
+```python
+spark.sql("SELECT * FROM iceberg.silver.orders WHERE amount <= 0 OR order_id IS NULL").show()
+# empty result: no bad rows survived into Silver
+```
+
+That empty result is the point of the medallion: Gold's revenue numbers are trustworthy because the bad data was filtered out one tier below, and you can prove it with a query rather than take it on faith.
+
 **What just happened?** You're reading a business-ready table: daily revenue and order counts by status. Trace its lineage in your head. These numbers came from Silver (clean, deduplicated orders), which came from Bronze (the raw landing), which came from the generator standing in for a source system. That full path, from raw event to business metric, is the entire data engineering flow in miniature, and you built it declaratively.
 
 ## Data quality in OSS Spark Declarative Pipelines
