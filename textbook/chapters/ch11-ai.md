@@ -33,7 +33,7 @@ That last point is worth dwelling on, because it's a genuine pain in real ML wor
 
 > **Experiment tracking** *(canonical term)*: recording each model run's parameters, metrics, and artifacts so runs are comparable and reproducible.
 
-> **Model registry** *(canonical term)*: a versioned store of trained models, promotable through stages (for example, staging then production).
+> **Model registry** *(canonical term)*: a versioned store of trained models, promoted by pointing named aliases (for example, `staging`, then `production`) at specific versions.
 
 Without tracking, model development is a mess of notebooks and "which version was that?" MLflow fixes both ends: every training run is logged (what params, what score, what artifact), and the good models get registered under a name with versions you can promote or roll back, the same disciplined versioning Iceberg gave your data, now for your models.
 
@@ -45,12 +45,22 @@ Because you train on an Iceberg Gold table, you can log the table's snapshot id 
 
 ## Build: train, track, register
 
-**Step 1: add MLflow to your Compose file.** The tracking server records every run and stores model artifacts. Point its artifact store at your SeaweedFS bucket (in-network address `seaweedfs:8333`), and use a simple SQLite backend for the run metadata (Postgres in production). It joins the same network and publishes its UI on 5000.
+**Step 1: add MLflow to your Compose file.** The tracking server records every run and stores model artifacts. Its artifact store is your SeaweedFS bucket (in-network address `seaweedfs:8333`), and its run metadata goes in a simple SQLite file (Postgres in production). One wrinkle first: the official MLflow image ships without `boto3`, the AWS SDK for Python, which the server needs to write artifacts to S3-compatible storage. Without it, the server starts fine and then fails the first time a model is logged. So build a two-line image on top of it. Create `docker/mlflow/Dockerfile`:
+
+```dockerfile
+# docker/mlflow/Dockerfile
+# The official image ships without boto3, which the server needs to store
+# artifacts in S3-compatible storage (our SeaweedFS bucket).
+FROM ghcr.io/mlflow/mlflow:v3.1.0
+RUN pip install --no-cache-dir boto3
+```
+
+Then add the service:
 
 ```yaml
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v3.1.0
-    container_name: mlflow
+    build: ./docker/mlflow
+    image: open-lakehouse-mlflow:3.1.0
     depends_on:
       - seaweedfs
     environment:
@@ -62,62 +72,130 @@ Because you train on an Iceberg Gold table, you can log the table's snapshot id 
       --backend-store-uri sqlite:////mlflow/mlflow.db
       --artifacts-destination s3://lakehouse/mlflow-artifacts
       --serve-artifacts
+    volumes:
+      - mlflow-db:/mlflow          # run + registry metadata; without it, history resets on recreate
     ports:
       - "5000:5000"
     networks:
       - lakehouse-network
 ```
 
-The server needs `boto3` to write artifacts to S3; recent MLflow images include it, but if artifact logging fails with a missing-module error, use an image that bundles `boto3` (or build a small one that `pip install`s it). Bring it up and open the UI:
+and add `mlflow-db:` to the top-level `volumes:` list.
+
+Two lines deserve a closer look. `--serve-artifacts` makes the tracking server a proxy for artifacts: your training script uploads the model to `http://localhost:5000`, and the *server* writes it to SeaweedFS. So the S3 credentials live in exactly one place, the server's environment, and your laptop never needs them. And the `mlflow-db` volume is the same lesson as Unity Catalog's database in Chapter 5: the SQLite file holds every run and every registered model version, and without a volume it lives inside the container, so the next `docker compose up` that recreates the container would quietly erase your experiment history.
+
+Bring it up and check it:
 
 ```bash
-docker compose up -d mlflow
-docker compose ps
-curl -s http://localhost:5000/health
+docker compose up -d --build mlflow
+docker compose ps mlflow
+curl -s http://localhost:5000/health      # -> OK
 ```
 
 **What just happened?** You started the MLflow tracking server, the service that records every training run and stores registered models. The UI on `http://localhost:5000` is where model work becomes visible and comparable, the same way the Airflow UI made orchestration visible. Keep it open as you train; watching runs appear is how the tracking concept becomes concrete.
 
-**Step 2: read Gold as training data over Spark Connect, then train and log with MLflow.** Put this in `ml/train.py` (the training lives in the repo like everything else, not in a scratch notebook). It reuses the project's `get_spark()` factory, so it reaches Spark the same way every other module does; it reaches MLflow at `http://localhost:5000`. We fit a small model that predicts order count from revenue, trivial on purpose; the workflow is the lesson. Run it with `python ml/train.py` once it's written.
+**Step 2: read Gold as training data, then train and log with MLflow.** Install the client libraries into your project environment (pin MLflow to the server's version):
+
+```bash
+pip install mlflow==3.1.0 scikit-learn
+```
+
+Put the training code in `ml/train.py` (it lives in the repo like everything else, not in a scratch notebook). It reuses the project's `get_spark()` factory, so it reaches Spark the same way every other module does, and it reaches MLflow at `http://localhost:5000`. The model predicts a row's order count from its revenue: trivial on purpose; the workflow is the lesson.
 
 ```python
-import mlflow, mlflow.sklearn
+# ml/train.py  --  python ml/train.py [feature ...]
+import os
+import sys
+
+import mlflow
+import mlflow.sklearn
 from sklearn.linear_model import LinearRegression
+
+from lakehouse.config import CATALOG
 from lakehouse.session import get_spark
 
-spark = get_spark("train-order-count")
+GOLD = f"{CATALOG}.gold.daily_revenue"
+MLFLOW_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
-# Record WHICH data trained the model (snapshot id -> reproducibility).
-snap = spark.sql("SELECT max(snapshot_id) s FROM iceberg.gold.daily_revenue.snapshots").collect()[0]["s"]
-pdf = spark.table("iceberg.gold.daily_revenue").toPandas()
-X, y = pdf[["revenue"]], pdf["order_count"]
 
-mlflow.set_tracking_uri("http://localhost:5000")
-mlflow.set_experiment("orders-baseline")
+def load_training_data(spark):
+    """Pin the read to one snapshot and return (snapshot_id, pandas DataFrame).
+    Reading *at* the snapshot we log, rather than "whatever is current", is what
+    makes the logged lineage true even if Gold is refreshed mid-run."""
+    snap = spark.sql(f"SHOW TBLPROPERTIES {GOLD} ('current-snapshot-id')").collect()[0]["value"]
+    pdf = (spark.read.option("versionAsOf", snap).table(GOLD)
+                .selectExpr("order_date", "status",
+                            "CAST(revenue AS DOUBLE) AS revenue",   # DECIMAL -> float for sklearn
+                            "order_count")
+                .toPandas())
+    return snap, pdf
 
-with mlflow.start_run():
-    model = LinearRegression().fit(X, y)
-    mlflow.log_param("gold_snapshot_id", snap)     # data lineage
-    mlflow.log_param("features", "revenue")
-    mlflow.log_metric("r2", model.score(X, y))     # a metric to compare runs
-    mlflow.sklearn.log_model(model, "model")       # the artifact
+
+def train(features=("revenue",)):
+    spark = get_spark("train-order-count")
+    snap, pdf = load_training_data(spark)
+    pdf["is_cancelled"] = (pdf["status"] == "cancelled").astype(int)   # a second candidate feature
+    X, y = pdf[list(features)], pdf["order_count"]
+
+    mlflow.set_tracking_uri(MLFLOW_URI)
+    mlflow.set_experiment("orders-baseline")
+    with mlflow.start_run() as run:
+        model = LinearRegression().fit(X, y)
+        mlflow.log_param("gold_table", GOLD)
+        mlflow.log_param("gold_snapshot_id", snap)          # data lineage
+        mlflow.log_param("features", ",".join(features))
+        mlflow.log_param("training_rows", len(pdf))
+        mlflow.log_metric("r2", model.score(X, y))          # a metric to compare runs
+        info = mlflow.sklearn.log_model(model, name="model", input_example=X.head(3))
+    print(f"run {run.info.run_id}: r2={model.score(X, y):.4f} on {len(pdf)} rows, snapshot {snap}")
+    print(f"model uri: {info.model_uri}")
+    return info.model_uri
+
+
+if __name__ == "__main__":
+    train(tuple(sys.argv[1:]) or ("revenue",))
 ```
 
-Expected: a new run appears under the `orders-baseline` experiment in the MLflow UI, showing the `r2` metric, the logged params (including the Gold snapshot id), and the saved model artifact.
+Run it:
 
-**What just happened?** Look at the `log_param("gold_snapshot_id", snap)` line, that is the reproducibility idea from the last section in one call. You captured the exact Iceberg snapshot the training data came from and stamped it onto the run. A year from now, "what data trained this model?" has an exact answer, and you can time-travel to that snapshot to get the identical rows. The rest is standard MLflow: log the params you chose, the metric to judge by, and the model artifact itself. Notice how little of this is about the model; it's about recording the work so it's not lost.
+```bash
+python ml/train.py
+```
 
-**Step 3: register the model to version and promote it.**
+Expected: MLflow prints links to the run and the experiment, then the script's own summary. From a verification run with the Chapter 9 backfill loaded (more days means more Gold rows; with only one day loaded you'll have far fewer):
+
+```
+run f384b1c2...: r2=0.9984 on 27 rows, snapshot 4778004762130462748
+model uri: models:/m-4d6e08c2...
+```
+
+In the UI, a new run appears under the `orders-baseline` experiment, showing the `r2` metric, the params (including `gold_snapshot_id` and `training_rows`), and the saved model with its files (`MLmodel`, `model.pkl`, the environment files, an input example). Those files are real objects in your bucket, under `s3://lakehouse/mlflow-artifacts/`; list them with the S3 CLI from Chapter 3 if you want to see them.
+
+**What just happened?** Look at `load_training_data`, because it is the reproducibility idea from the last section done carefully. It asks Iceberg for the table's current snapshot id, then reads the table *at that snapshot* (`versionAsOf`) and logs the same id on the run. The order matters. If you logged "the latest snapshot" and separately read "the table", a Gold refresh landing between the two calls (your Airflow DAG runs daily, after all) would leave the run claiming data it never trained on. Pinning the read to the logged snapshot makes the lineage true by construction. A year from now, "what data trained this model?" has an exact answer, and `spark.read.option("versionAsOf", <that id>)` gets you the identical rows.
+
+Three smaller details:
+
+- **Why `SHOW TBLPROPERTIES`, not the `.snapshots` metadata table?** Iceberg's metadata tables are the usual way to ask for snapshot ids, but with Unity Catalog 0.7 they fail through the REST catalog (Chapter 5 explains why). Iceberg also publishes the current snapshot id as a table property, which works everywhere.
+- **The `CAST(revenue AS DOUBLE)`.** Silver made money an exact `DECIMAL` (Chapter 7). That's right for revenue reports, but scikit-learn wants plain floats, so the cast happens at the edge, where the data enters the model.
+- **`log_model(..., name="model", input_example=...)`.** MLflow 3 treats a logged model as a first-class object with its own id and URI (`models:/m-...`), which the script returns. The input example records what a valid input looks like, so anyone loading the model later knows its expected columns.
+
+**Step 3: register the model to version and promote it.** Registering gives a logged model a name and a version number:
 
 ```python
-result = mlflow.register_model(
-    model_uri=f"runs:/{mlflow.last_active_run().info.run_id}/model",
-    name="orders-order-count",
-)
-# The registry now holds version N of "orders-order-count", ready to promote.
+import mlflow
+import sys
+sys.path.insert(0, "ml")
+from train import train
+
+mlflow.set_tracking_uri("http://localhost:5000")
+model_uri = train()                                   # train and log a fresh run
+result = mlflow.register_model(model_uri, "orders-order-count")
+print("registered version", result.version)
 ```
 
-Expected: the model shows up in the MLflow Models tab as a named, versioned entry you can move through stages.
+Expected: `Successfully registered model 'orders-order-count'` and `Created version '1'` (a higher number if you register again). The model shows up in the MLflow Models tab as a named, versioned entry.
+
+You'll see older tutorials register with `runs:/<run_id>/model`. MLflow 3 still accepts that, but only by falling back with a warning (`Run ... has no artifacts at artifact path 'model', registering model based on models:/m-... instead`), because models are no longer stored under the run. Registering the `model_uri` that `log_model` returned is the direct path.
 
 **What just happened?** You promoted a run's model into the registry, a named, versioned home for models you might actually use. This is the difference between "a model file somewhere" and "version 3 of `orders-order-count`, which we can promote to production or roll back." The registry is to models what the catalog is to tables: the one authoritative, versioned source of truth.
 
@@ -125,38 +203,52 @@ Expected: the model shows up in the MLflow Models tab as a named, versioned entr
 
 ```python
 import mlflow.sklearn
+import pandas as pd
 
 model = mlflow.sklearn.load_model(f"models:/orders-order-count/{result.version}")
-print(model.predict([[40000.0]]))   # predicted order_count at $40k revenue, e.g. [531.2]
+print(model.predict(pd.DataFrame({"revenue": [40000.0]})))
 ```
 
-Expected: a predicted `order_count` for a day with \$40,000 of revenue. The number is uninteresting (it's a toy model); what matters is the round-trip, you loaded a model *by name and version* from the registry and ran it, with no file paths, no "which .pkl was it," no guesswork. That is exactly how a serving job or batch-scoring pipeline would load it in production: `models:/orders-order-count/<version>`, the model as an addressable, versioned artifact.
+Expected: a predicted `order_count` for a Gold row with $40,000 of revenue. From the verification run above it was about `[161.8]`. That makes sense once you remember each Gold row is one *status* on one day, not a whole day: a cancelled-orders row with $40,000 of revenue had roughly 160 orders. The number itself is uninteresting; what matters is the round-trip. You loaded a model *by name and version* from the registry and ran it, with no file paths, no "which .pkl was it," no guesswork. That is exactly how a serving job or batch-scoring pipeline would load it in production: `models:/orders-order-count/<version>`. (Passing a DataFrame with the `revenue` column, rather than a bare list, matches the input example the model was logged with and avoids a feature-name warning.)
 
-**Step 4: compare runs.** Train again with a tweak (a different feature, say) and view both runs side by side in the UI, sorted by `r2`. This is why tracking exists: objective comparison instead of guesswork.
+**Step 4: compare runs.** Train again with a second feature and compare:
 
-**What just happened?** You just experienced the entire point of experiment tracking. Two runs, side by side, sorted by score: you can see which was better instead of guessing. Scale that from two runs to two hundred and you understand why no serious ML team works without tracking. The best run isn't the one you remember; it's the one the data says is best.
+```bash
+python ml/train.py revenue is_cancelled
+```
+
+In the UI, select both runs in the `orders-baseline` experiment and compare them, or sort the run list by `r2`. In verification, adding `is_cancelled` nudged `r2` from 0.9984 to 0.9985 on the same snapshot: a real but tiny gain. Because both runs logged the same `gold_snapshot_id`, you know the comparison is fair: same data, different features. That's the quiet power of logging lineage; without it, you couldn't tell whether a better score came from a better model or different data.
+
+**What just happened?** You just experienced the entire point of experiment tracking. Two runs, side by side, sorted by score, provably on the same data: you can see which was better instead of guessing. Scale that from two runs to two hundred and you understand why no serious ML team works without tracking. The best run isn't the one you remember; it's the one the data says is best.
+
+A note on honesty about the model itself: a regression with a near-perfect `r2` on a couple of dozen rows is not impressive, it's expected, because order count and revenue rise together almost by definition. Treat it as a stand-in. The lakehouse half of this chapter (pinned snapshots, lineage, a registry) is exactly what you'd keep when the model becomes a real one.
 
 ## Troubleshooting
 
-- **`mlflow` can't connect to the tracking server.** The tracking URI is wrong or the server is down. Confirm `docker compose ps` shows MLflow healthy and that `set_tracking_uri("http://localhost:5000")` matches.
-- **Artifact logging fails with a missing-module or S3 error.** The server image lacks `boto3`, or `MLFLOW_S3_ENDPOINT_URL` doesn't point at SeaweedFS. Use an image with `boto3` and confirm the endpoint and credentials.
-- **`.toPandas()` is slow or runs out of memory.** You're pulling a table into local memory. Fine for a small Gold table like ours; for big data you'd sample or train distributed. Keep the teaching example small.
-- **The snapshots query errors.** The `.snapshots` metadata table is Iceberg-specific; confirm you're querying an Iceberg table through the catalog (Chapter 5).
-- **`register_model` fails or no run found.** `last_active_run()` returns nothing if the run already closed. Register inside or right after the `with mlflow.start_run()` block, or pass the run id explicitly.
+- **The log says it "found environment variables used during model inference" and names one of your API keys.** MLflow scans your shell's environment for variable names that look like credentials and writes the *names* (never the values) to `environment_variables.txt` in the model's artifacts, as a hint for whoever deploys it. Nothing secret is stored, but if you'd rather it not record them, `export MLFLOW_RECORD_ENV_VARS_IN_MODEL_LOGGING=false` before training.
+- **`mlflow` can't connect to the tracking server.** The tracking URI is wrong or the server is down. Confirm `docker compose ps` shows MLflow running and `curl http://localhost:5000/health` returns `OK`.
+- **Logging the model fails with `No module named 'boto3'` (in the server's logs) or an S3 error.** The server is running the stock image. Build the `docker/mlflow` image (`docker compose up -d --build mlflow`) and confirm `MLFLOW_S3_ENDPOINT_URL` points at `http://seaweedfs:8333`.
+- **Your runs and registered models disappeared after a restart.** The `mlflow-db` volume is missing, so the SQLite file lived inside the container and went away with it. Add the volume; history from before is gone.
+- **`NoSuchNamespaceException: Schema not found: iceberg.gold.daily_revenue`.** You queried the `.snapshots` metadata table (`iceberg.gold.daily_revenue.snapshots`). With Unity Catalog 0.7 these lookups fail (Chapter 5). Use `SHOW TBLPROPERTIES ... ('current-snapshot-id')` as `train.py` does.
+- **`Time travel option snapshot-id is no longer supported`.** Use `versionAsOf`, as in `load_training_data`.
+- **scikit-learn complains about `Decimal` values.** The `revenue` column reached pandas as `DECIMAL`. Cast it to `DOUBLE` in the Spark read, as `train.py` does.
+- **`r2` is `nan` or the fit fails.** Gold has too few rows (fewer than two). Load more days (`make ingest DATE=...` or the Chapter 9 backfill) and refresh Silver and Gold.
+- **`.toPandas()` is slow or runs out of memory.** You're pulling a table into local memory. Fine for a small Gold table like ours; for big data you'd sample or train distributed.
+- **`register_model` warns that the run has no artifacts at path `model`.** You registered `runs:/<run_id>/model`. It still works through MLflow 3's fallback; register the `model_uri` returned by `log_model` instead.
 
 ## Checkpoint
 
 - MLflow is healthy; the UI opens on 5000.
 - You read `iceberg.gold.daily_revenue` as training data over `sc://`.
-- A run logged params (including the Gold snapshot id), the `r2` metric, and a model artifact.
-- You registered the model and can see a versioned entry in the registry.
+- A run logged params (including the Gold snapshot id it actually read), the `r2` metric, and a model whose files are in `s3://lakehouse/mlflow-artifacts/`.
+- You registered the model, can see a versioned entry in the registry, and loaded it back by `models:/orders-order-count/<version>`.
 - You can explain how snapshots make the training set reproducible.
 
 ## Try it yourself
 
 1. **Run the comparison for real.** Train three times with different features or parameters, then sort the runs by `r2` in the UI and identify the best. You've now used tracking the way real teams do.
-2. **Prove reproducibility.** Note the `gold_snapshot_id` you logged. Write out (in words or SQL) how you'd time-travel to that snapshot to reconstruct the exact training data months later.
-3. **Promote a version.** In the registry, move your model between stages (to "staging," say). Notice that "what's the current staging model?" is now a precise answer, not a guess.
+2. **Prove reproducibility.** Copy the `gold_snapshot_id` from a run in the UI, refresh Gold (re-run Chapter 7's two refreshes, or let the DAG run), then read `spark.read.option("versionAsOf", <id>).table("iceberg.gold.daily_revenue")` and compare it to what the run trained on (`training_rows`). The current table moved on; the snapshot didn't.
+3. **Promote a version.** MLflow 3 promotes models with *aliases* rather than the older fixed stages. Point an alias at a version with `mlflow.MlflowClient().set_registered_model_alias("orders-order-count", "staging", <version>)`, then load it by role instead of number: `mlflow.sklearn.load_model("models:/orders-order-count@staging")`. Move the alias to a newer version and the same load picks it up. "What's the current staging model?" is now a precise answer, not a guess.
 4. **Explain the pattern.** In two sentences, explain to an imaginary ML colleague why training on a Gold Iceberg table beats training on an exported CSV.
 
 ## Check your understanding

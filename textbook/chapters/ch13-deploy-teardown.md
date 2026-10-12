@@ -26,46 +26,73 @@ open-lakehouse/
 ├── docker-compose.yml      # every service: SeaweedFS, Spark, Unity Catalog, Kafka, Airflow, MLflow
 ├── pyproject.toml          # the installable `lakehouse` package
 ├── Makefile                # one-command operations (below)
-├── .env / .env.example     # secrets, gitignored
+├── AGENTS.md               # how an agent (or a new teammate) operates the stack
+├── .env / .env.example     # secrets (gitignored) and the names they need (committed)
+├── .gitignore              # .env, data/, .venv/, __pycache__/
 ├── config/
-│   ├── spark/spark-defaults.conf
-│   └── unity-catalog/server.properties
+│   ├── spark/spark-defaults.conf        # Connect server: jars, S3, the Iceberg catalog
+│   └── unity-catalog/server.properties  # catalog: storage bucket + credentials
+├── docker/
+│   ├── airflow/Dockerfile  # Airflow + a JRE + the Spark Connect client (Chapter 9)
+│   └── mlflow/Dockerfile   # MLflow + boto3 for S3 artifacts (Chapter 11)
 ├── lakehouse/              # the shared package every layer imports
 │   ├── config.py           # one source of truth for endpoints + catalog name
 │   ├── session.py          # get_spark() factory
-│   ├── generate.py         # the source-data generator
+│   ├── catalog.py          # ask the catalog directly: table metadata, snapshots
+│   ├── generate.py         # the seeded, per-day source-data generator
 │   ├── ingest.py           # idempotent, date-parameterized Bronze ingest
-│   └── quality.py          # reusable Silver cleaning
+│   ├── quality.py          # reusable Silver cleaning
+│   ├── stream_source.py    # Kafka producer standing in for an app
+│   └── stream_ingest.py    # Kafka -> Structured Streaming -> Bronze
 ├── pipelines/medallion/    # the SDP project (Silver + Gold)
-├── dags/medallion.py       # Airflow DAG, imports lakehouse.ingest
-├── ml/train.py             # MLflow training on Gold
-├── tests/test_quality.py   # unit test for the cleaning rules
-└── AGENTS.md               # how an agent operates the stack
+│   ├── spark-pipeline.yml
+│   └── transformations/medallion.py
+├── dags/lakehouse_medallion_pipeline.py   # Airflow DAG, imports lakehouse.generate + ingest
+├── ml/train.py             # MLflow training on a pinned Gold snapshot
+├── tests/test_quality.py   # tests for the cleaning rules
+└── data/                   # local scratch, gitignored
 ```
 
-Notice the shape: `lakehouse/` holds the logic once, and `dags/`, `ml/`, `pipelines/`, and `tests/` all import from it. The DAG runs the same `ingest_orders` you call by hand; the pipeline cleans with the same `clean_orders` the test verifies. That one-definition-per-thing is what separates a real codebase from a pile of chapter snippets, and it's why this is a stack you could actually keep running rather than a demo you'd throw away.
+Notice the shape: `lakehouse/` holds the logic once, and `dags/`, `ml/`, `pipelines/`, and `tests/` all import from it. The DAG runs the same `generate_orders` and `ingest_orders` you call by hand; the pipeline cleans with the same `clean_orders` the test verifies. That one-definition-per-thing is what separates a real codebase from a pile of chapter snippets, and it's why this is a stack you could actually keep running rather than a demo you'd throw away.
 
 ## Operate it with one command
 
 Production systems don't make you memorize a dozen incantations. Tie the common operations together in a `Makefile` at the repo root (recipe lines are tab-indented):
 
 ```makefile
-up:            # bring the whole stack up
+# Makefile: the operator surface for you, a teammate, or an agent (Chapter 12).
+# Recipe lines must start with a TAB.
+SPARK_REMOTE ?= sc://localhost:15002
+DATE         ?= 2026-01-05
+export SPARK_REMOTE
+
+.PHONY: up down ps ingest pipeline test train
+
+up:            ## bring the whole stack up
 	docker compose up -d
-down:          # stop everything, keep data volumes
+down:          ## stop everything, keep data volumes
 	docker compose down
-ps:            # health check
+ps:            ## health check
 	docker compose ps
-ingest:        # generate + land a Bronze batch
-	python -m lakehouse.generate
-	python -m lakehouse.ingest 2026-01-05
-pipeline:      # build Silver + Gold
-	cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002
-test:          # run the tests
-	pytest tests/
+ingest:        ## land one day's raw drop and ingest it into Bronze (make ingest DATE=2026-01-06)
+	python -m lakehouse.generate $(DATE)
+	python -m lakehouse.ingest $(DATE)
+pipeline:      ## rebuild Silver, then Gold (two refreshes; see Chapter 7)
+	cd pipelines/medallion && spark-pipelines run --remote $(SPARK_REMOTE) --refresh silver.orders
+	cd pipelines/medallion && spark-pipelines run --remote $(SPARK_REMOTE) --refresh gold.daily_revenue
+test:          ## run the tests (needs the Connect server up)
+	pytest tests/ -q
+train:         ## train + log a model on Gold
+	python ml/train.py
 ```
 
-Now the whole lifecycle is `make up`, `make ingest`, `make pipeline`, `make test`, `make down`. That is the operator surface a teammate, or an agent (Chapter 12), drives, and it's the final touch that makes the project feel like a product instead of an exercise.
+Now the whole lifecycle is `make up`, `make ingest`, `make pipeline`, `make test`, `make train`, `make down`. Three details make it more than a list of aliases:
+
+- **Variables with defaults.** `make ingest` lands the default day; `make ingest DATE=2026-01-10` lands any other. `SPARK_REMOTE ?=` means "use the environment's value if there is one", so the same Makefile drives a remote cluster with `SPARK_REMOTE=sc://... make pipeline`, the Chapter 4 portability idea once more.
+- **The pipeline target encodes a lesson.** It refreshes Silver, then Gold, as two runs, because of the SDP limitation from Chapter 7. Whoever runs `make pipeline` (you next month, a teammate, an agent) gets the right order without having to know why.
+- **`.PHONY`.** These targets are commands, not files, and `.PHONY` tells make never to skip them because a file with the same name happens to exist.
+
+That is the operator surface a teammate, or an agent (Chapter 12), drives, and it's the final touch that makes the project feel like a product instead of an exercise. (If `make` complains about a "missing separator", a recipe line was indented with spaces instead of a tab.)
 
 ## Self-hosted vs. managed
 
@@ -83,7 +110,7 @@ So which should you use in real life? The honest tradeoff: managed services buy 
 
 Taking this to the cloud doesn't change the architecture, only who runs the boxes. The standard way to describe a cloud deployment is Terraform, infrastructure as code. We tour the shape here rather than running it, so you don't incur cloud costs to learn the path. Two shapes are worth knowing:
 
-- **Self-hosted on cloud:** the same open components, just on cloud infrastructure. Spark on ECS or EMR, object storage on S3, the catalog's Postgres on RDS. You still run the open stack; the cloud provides the machines.
+- **Self-hosted on cloud:** the same open components, just on cloud infrastructure. Spark on ECS or EMR, object storage on S3, and the catalog's database moved from the embedded file it uses locally (the `uc-db` volume) to Postgres on RDS. You still run the open stack; the cloud provides the machines.
 - **Fully managed:** a platform like Databricks runs Spark, the catalog, and the pipelines for you. Your Iceberg tables and SDP/Spark code still port over, because they're open.
 
 To make "declare the infrastructure" concrete, here is the *shape* of the self-hosted-on-cloud path in Terraform. This is illustrative, not something you apply in this course (that would mean a cloud account and a bill); read it for the mapping from each local service to its cloud counterpart:
@@ -125,7 +152,15 @@ docker compose down
 docker compose ps
 ```
 
-Expected: all services stop and the containers are removed; `docker compose ps` shows nothing running. Your data volumes (`seaweedfs-data`, the catalog's Postgres, etc.) remain, so a later `docker compose up -d` resumes where you left off.
+Expected: all services stop and the containers are removed; `docker compose ps` shows nothing running. The named volumes remain, and `docker volume ls` shows them, prefixed with your project name:
+
+- `seaweedfs-data`: every object in the bucket, so your Iceberg data and metadata files, the raw drops, the stream checkpoint, and the MLflow artifacts.
+- `uc-db`: Unity Catalog's embedded database, which holds the catalog, schemas, and each table's pointer to its current `metadata.json`.
+- `airflow-db`: Airflow's run history.
+- `mlflow-db`: MLflow's runs and model registry.
+- `zookeeper-data`, `zookeeper-log`, and `kafka-data`: the Kafka broker's state, including the `orders` topic and its messages. Without them the topic vanishes on recreate and the streaming job fails with `UnknownTopicOrPartitionException` when it restarts against a broker that no longer has it.
+
+Each of those volumes was a deliberate line in an earlier chapter, and each one is what turns "the container restarted" into a non-event. Without `uc-db`, for example, your Parquet files would survive in SeaweedFS but the catalog would forget every table that points at them: storage intact, lakehouse gone.
 
 **What just happened?** `docker compose down` is the gentle option: it halts and removes the running services but leaves your data volumes intact. Think of it as closing the shop for the night, not demolishing it. When you come back and `docker compose up -d`, your Iceberg tables, catalog entries, and everything else are exactly where you left them. This is the command for "I'm done for today," not "I'm done forever."
 
@@ -133,12 +168,12 @@ Prove it, don't trust it. Bring the stack back up and confirm your Gold table su
 
 ```bash
 docker compose up -d
-# wait for the catalog and Spark to be healthy, then:
+# wait for the catalog and Spark to be ready (docker compose logs spark-connect), then:
 python3 -c "from lakehouse.session import get_spark; \
 print(get_spark().table('iceberg.gold.daily_revenue').count(), 'Gold rows survived')"
 ```
 
-Expected: the same row count you had before the teardown. The containers were destroyed and recreated, but the data lived in named volumes, not in the containers, so it is exactly where you left it. That separation of compute (ephemeral containers) from storage (durable volumes) is the same decoupling principle from Chapter 1, now visible in your teardown habit.
+Expected: the same row count you had before the teardown. Check the other layers the same way: the MLflow Models tab still lists every version of `orders-order-count`, the Airflow UI still shows every past run, and the `orders` topic is still in Kafka, so the stream job can restart from its checkpoint. In verification, all three survived a full `down`/`up`. The containers were destroyed and recreated, but the state lived in named volumes, not in the containers, so it is exactly where you left it. (Give the Connect server a minute after `up`: it re-downloads its jars at startup.) That separation of compute (ephemeral containers) from storage (durable volumes) is the same decoupling principle from Chapter 1, now visible in your teardown habit.
 
 **Step 2: full reset, only if you want a clean slate (this wipes data).** The `-v` flag removes the named volumes too:
 
@@ -184,7 +219,7 @@ Every layer, built by you, running on your own machine, entirely open source. If
 ## Try it yourself
 
 1. **Do a full round-trip.** `docker compose down`, confirm everything's down, then `docker compose up -d` the stack again and verify your Gold table survived. Feel the difference between stopping and wiping.
-2. **Sketch the Terraform.** For the self-hosted-on-cloud path, write down which cloud resource replaces each local component (S3 for the object store, RDS for the catalog's Postgres, EMR or ECS for Spark). You're mapping a production deployment without paying for one.
+2. **Sketch the Terraform.** For the self-hosted-on-cloud path, write down which cloud resource replaces each local component (S3 for the object store, RDS Postgres for the catalog's database (and Airflow's), EMR or ECS for Spark). You're mapping a production deployment without paying for one.
 3. **Write your own roadmap.** From the "where to go next" list, pick one item and write down the first three concrete steps you'd take. Commit to actually doing it.
 4. **Teach it back.** The ultimate test: explain the whole architecture, storage to agents, to someone else (or to a rubber duck) in five minutes, using the Chapter 1 architecture diagram. If you can, you've truly got it.
 

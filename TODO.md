@@ -3,117 +3,88 @@
 This file tracks build/infra items for the people producing the course. It is not
 part of the textbook and students never need it.
 
-## Unity Catalog image (the one to swap)
-- Chapter 5 pulls `unitycatalog/unitycatalog:v0.7.0`, presented as a normal image
-  pull. As of 2026-10 that exact image is **not yet published** on Docker Hub
-  (only v0.6.0 is released, and its Iceberg REST catalog is read-only). The 0.7
-  write endpoints (createTable / commit / updateTable) exist on the `v0.7.0` source
-  tag.
-- INTERIM, for building and testing the course only — do NOT put this in the
-  chapters: build UC 0.7 from source and run that image locally:
-    git clone https://github.com/unitycatalog/unitycatalog
-    cd unitycatalog && git checkout v0.7.0
-    # build the server + container per the repo's build docs (sbt), tag it
-    # unitycatalog/unitycatalog:v0.7.0 so the Compose file in Ch5 finds it
-- ACTION: the official 0.7 image is expected in ~a couple of weeks. When it lands,
-  confirm the real tag/namespace (the project has skipped tags before — v0.4.1 was
-  never published) and update the `image:` in Chapter 5 to the official container.
-  No chapter text should ever instruct building from source.
-
 ## Decision locked
-- Native Iceberg end to end via UC 0.7's writable IRC. No Delta, no UniForm.
-  Keeping the course Delta-free is exactly why we wait for 0.7.
+- Native Iceberg end to end via Unity Catalog 0.7's writable Iceberg REST catalog.
+  No Delta, no UniForm.
 
-## Other open build items (from source-level verification, 2026-10)
-- config/spark/spark-defaults.conf: Iceberg runtime + spark.sql.extensions +
-  S3FileIO (SeaweedFS endpoint + path-style) + spark-sql-kafka + hadoop-aws.
-- Define top-level `networks: lakehouse-network:` and attach every service.
-- Ch8: align the streaming schema with orders_raw (or write a separate table).
-- UC -> SeaweedFS: assume Spark's S3FileIO performs the data/metadata I/O
-  (SeaweedFS endpoint + path-style set in spark-defaults.conf); UC only records
-  the IRC commits. CONFIRM on the first real run.
-## Native (no-Docker) verification run, 2026-10-11 (orchestrator, via sys_os_shell)
-VERIFIED on this box:
-- Stage 1 (Ch3 SeaweedFS 3.80): unauth -> 403; wrong key -> InvalidAccessKeyId;
-  right key + path-style round-trip IDENTICAL. Auth model is correct.
-- Stage 2 (Ch4 Spark 4.1 + Connect): spark.range(5) over sc://localhost:15002
-  worked, and start-connect-server.sh came up WITHOUT an explicit
-  --packages spark-connect. Ch4's drop of that package is correct.
-FIXES CONFIRMED + APPLIED from the run:
-- hadoop-aws was MISSING: a catalog/`s3a://` read throws
-  ClassNotFoundException org.apache.hadoop.fs.s3a.S3AFileSystem. Added
-  hadoop-aws:3.4.1 to spark-defaults.conf (Ch4). Needed by Ch6's s3a JSON read.
-- AWS region: S3FileIO / AWS SDK v2 need a region even for SeaweedFS. Added
-  AWS_REGION env to the Spark services + spark.sql.catalog.iceberg.s3.region (Ch4/5).
-BLOCKED by RAM (environment ceiling, not a course bug):
-- Stage 3 (native Iceberg write to SeaweedFS via S3FileIO) and Stage 4 (UC 0.7
-  from source) OOM-kill on this ~8GB box (Spark+Iceberg too heavy). Could not
-  complete at runtime here. Verify these on a >=16GB box, or via Docker once the
-  official UC 0.7 image ships.
-APPLIED 2026-10-11 (source-level, still not runtime-verified; confirm on first >=16GB / Docker run):
-- Ch5: added Step 1b creating the UC catalog `iceberg` (POST .../catalogs). Renamed
-  the warehouse/UC-catalog from `lakehouse` to `iceberg` so it matches the Spark
-  catalog alias used everywhere (`iceberg.bronze.orders`), removing the alias vs
-  warehouse-name mismatch. Changed `spark.sql.catalog.iceberg.warehouse = iceberg`.
-- Ch5: curl paths fixed to `.../iceberg/v1/config?warehouse=iceberg` and
-  `.../iceberg/v1/catalogs/iceberg/namespaces/bronze/tables` (IRC prefix form).
-- Ch5: `.snapshots` now says 1 row after the first insert (CREATE makes no snapshot);
-  Step 2 "what just happened" and the rollback pitfall reworded to match.
-- Ch5: added a troubleshooting bullet for NoSuchCatalogException / storage-root.
-- CONFIRM ON FIRST RUN: exact UC 0.7 catalog-create REST shape, the IRC prefix
-  (`catalogs/iceberg`), and whether the catalog needs an explicit storage_root.
+## Runtime verification, 2026-10-12
 
-- Ch4: changed the Spark Connect mount from `./config/spark:/opt/spark/conf` (which
-  would hide the image's other conf files) to a single-file overlay
-  `./config/spark/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf`.
+The whole course was followed as a student, chapter by chapter, on a Linux host with
+Docker (16 cores, 156 GB RAM), and every code block in Chapters 2 to 13 was run. The
+chapters were then corrected to match what actually works. Versions verified:
+Spark 4.1.0 (Connect), Iceberg 1.12.0, hadoop-aws 3.4.2, Unity Catalog v0.7.0,
+Kafka (Confluent 7.5.0), Airflow 3.3.2, MLflow 3.1.0, DuckDB 1.5.6, PySpark client
+4.1.0, Python 3.12.
 
-(All source-level verification items now applied. Remaining work is a true runtime
-run on a >=16GB / Docker-capable host, and swapping in the official UC 0.7 image
-when it publishes.)
+Two images in the chapters are not yet published, so verification used stand-ins:
+- Unity Catalog `unitycatalog/unitycatalog:v0.7.0` was built locally from the
+  `v0.7.0` source tag (`docker build -t unitycatalog/unitycatalog:v0.7.0 .`).
+- SeaweedFS `chrislusf/seaweedfs:4.49` does not exist yet; verification used the
+  `chrislusf/seaweedfs:dev` image built 2026-10-12 (see open item 2).
 
-## Hands-on deepening pass, 2026-10-12 (Ch3-13) -- VERIFY THESE ON A REAL RUN
-The build sections were deepened with complete artifacts, see-it-change inspection,
-and real expected output. The following illustrative values/paths are NOT runtime-
-verified (sandbox can't run Docker; Spark+Iceberg OOMs here). A verification session
-should confirm each on a real >=16GB / Docker host and correct any that differ:
-- Ch3: `docker compose ps` columns; `s3 mb`/`cp`/`ls` output text; recursive-listing
-  key layout (object keys, no folder objects).
-- Ch4: `docker compose ps` 4-service table; Spark master UI labels (Workers ALIVE,
-  "Spark Connect server" running application); `spark.version` -> 4.1.0; the
-  2M-row groupBy appearing as a job in the UI.
-- Ch5: the EXACT object-storage layout of an Iceberg table (data/ Parquet +
-  metadata/ metadata.json + snap-*.avro + *.avro), the metadata.json JSON shape,
-  and that a 2nd insert adds a new metadata.json/snap/manifest while old ones remain.
-- Ch6: `generate_orders.py` output; raw drop = part-*.json + _SUCCESS; Bronze count
-  1000 then 1000 (idempotent); physical partition dir `_ingest_date=2026-01-05/`.
-- Ch7: Bronze (~1000) vs Silver (fewer) counts; the "zero bad rows in Silver" query
-  returns empty; Gold output shape.
-- Ch8: Bronze count starts at 1000 (batch) and climbs (stream); checkpoint dir holds
-  offsets/ commits/ metadata state/.
-- Ch9: the filled-in `ingest_bronze` task runs; `airflow dags list-runs` state=success.
-- Ch10: DuckDB output rows byte-for-byte match Spark's Gold rows.
-- Ch11: `models:/orders-order-count/<version>` loads and `.predict()` returns a value.
-- Ch12: an agent can operate the stack from the AGENTS.md; verify-the-agent query matches.
-- Ch13: data survives `docker compose down` + `up -d` (Gold count unchanged); the
-  Terraform snippet is illustrative only (not meant to apply).
+Verified end to end: S3 auth and round trip; Spark Connect jobs; catalog creation,
+Iceberg create/insert/schema evolution/time travel/rollback through UC; idempotent
+per-day ingest; the SDP medallion with tested cleaning rules; Kafka streaming into
+Bronze with watermark dedup and checkpoint restart (no duplicates, no gaps); the
+Airflow DAG and a sequential backfill; DuckDB reading Gold row-for-row identical to
+Spark; MLflow tracking, registry, and aliases; `make` targets; data surviving
+`docker compose down` + `up` in every stateful service.
 
-## Code re-architecture, 2026-10-12 (one installable `lakehouse` package) -- VERIFY
-The course now builds ONE project, not per-chapter snippets. Verify on a real host:
-- `pip install -e .` works (pyproject.toml, Ch2); `import lakehouse` resolves everywhere.
-- Ch4: lakehouse/config.py (SPARK_REMOTE, CATALOG) + session.py get_spark(); every
-  chapter from 5 on opens its session via `from lakehouse.session import get_spark`.
-- Ch6: lakehouse/generate.py (`python -m lakehouse.generate`) and lakehouse/ingest.py
-  (`python -m lakehouse.ingest 2026-01-05`), ingest is date-parameterized + idempotent.
-  config.py gains RAW_PREFIX here.
-- Ch7: lakehouse/quality.py clean_orders() called by the SDP Silver; tests/test_quality.py
-  runs under `pytest` (needs Connect up -- it's an integration test).
-- Ch8: producer is now lakehouse/stream_source.py (`python -m lakehouse.stream_source`).
-- Ch9: dags/medallion.py does `from lakehouse.ingest import ingest_orders` and passes
-  ctx["ds"]; the Airflow image must `pip install -e .` the project AND set
-  SPARK_REMOTE=sc://spark-connect:15002 so get_spark() reaches the in-network server.
-  CONFIRM: the lakehouse package + pipelines dir are mounted/installed in the Airflow image.
-- Ch11: ml/train.py (`python ml/train.py`), uses get_spark().
-- Ch13: Makefile targets (up/down/ps/ingest/pipeline/test) and the final repo tree are
-  the intended end-state layout; confirm the tree matches what a reader actually ends with.
-- CONFIRM env-var contract end to end: SPARK_REMOTE, LAKEHOUSE_CATALOG, RAW_PREFIX
-  resolve correctly from host (localhost) vs in-container (service names).
+Also added and runtime-verified during this pass:
+- ZooKeeper (`zookeeper-data`, `zookeeper-log`) and Kafka (`kafka-data`) volumes.
+  Without them the `orders` topic was lost on `down` + `up` and the restarted stream
+  failed with `UnknownTopicOrPartitionException`; with them the topic survives.
+- The streaming job sets shuffle partitions to 4, so the dedup state store holds 4
+  partitions (`state/0/` in the checkpoint) instead of the default 200 tiny ones.
+
+## Open items
+
+1. **Swap in the official Unity Catalog v0.7.0 image** when it is published. Confirm
+   the real tag/namespace (the project has skipped tags before; v0.4.1 was never
+   published). No chapter text should ever instruct building from source.
+
+2. **SeaweedFS 4.49 must ship before the course works as written.** Two SeaweedFS
+   behaviors matter, and no released version has both right:
+   - S3A directory markers: through 4.05, `HEAD dir` (no slash) on a marker answers
+     200 `application/x-directory`, so Hadoop S3A treats the parent as a file and every
+     Spark file write (`FileOutputCommitter` rename, streaming checkpoints) fails with
+     "destination parent is not a directory". Fixed by 4.12.
+   - Static session tokens: Unity Catalog 0.7 only vends static keys together with a
+     session token. 3.80 to 4.05 ignore the token; from 4.07 on it is rejected
+     (`InvalidAccessKeyId`), so UC's own metadata writes fail.
+   - Fix: seaweedfs/seaweedfs#11694 ("s3api: tolerate session tokens on statically
+     configured credentials", merged 2026-10-10). Verified working on the `dev` image.
+     When 4.49 (or whichever release first contains #11694) is out, confirm the tag
+     and update `image:` in Chapter 3 if it differs.
+   - With a release containing both fixes, the AWS SDK checksum env vars
+     (`AWS_REQUEST_CHECKSUM_CALCULATION` / `AWS_RESPONSE_CHECKSUM_VALIDATION`) are
+     not needed; they were only required against 3.80.
+
+3. **Upstream bug candidates** (reproduced; workarounds are in the chapters):
+   - **Unity Catalog 0.7: metadata tables fail.** `loadTable` for an identifier like
+     `bronze.orders.snapshots` returns 404 `NoSuchNamespaceException` ("Schema not
+     found: iceberg.bronze.orders"). The Iceberg REST spec defines LoadTable's 404 as
+     `NoSuchTableException`, and Iceberg's client only falls back to metadata-table
+     resolution on that type, so `.snapshots`, `.files`, `.history` are unusable from
+     Spark. Workarounds in the course: `SHOW TBLPROPERTIES ... ('current-snapshot-id')`,
+     the `_file` metadata column, and `lakehouse/catalog.py` (snapshot list via the REST
+     loadTable call; worth keeping as a teaching tool even after a fix). When fixed,
+     restore the metadata-table queries in Chapters 5 and 11.
+   - **OSS SDP 4.1 (also 4.1.3) on Iceberg: MV reading an MV in one run is empty.**
+     At run start SDP truncates every materialized view; the downstream flow's scan of
+     the upstream table is planned against the truncated snapshot, so Gold reads an
+     empty Silver and commits zero rows (only the first run after a drop works). The
+     Spark log shows Gold scanning Silver's `delete` snapshot. Workaround in the course:
+     refresh in two runs (`--refresh silver.orders`, then `--refresh gold.daily_revenue`)
+     in the Makefile and as two DAG tasks. When fixed, restore the single
+     `spark-pipelines run` in Chapters 7, 9, 12, 13.
+   - **MLflow image** `ghcr.io/mlflow/mlflow:v3.1.0` ships without `boto3`; the course
+     builds a two-line image. Recheck on the next MLflow pin.
+
+4. **No Iceberg Spark runtime for Spark 4.2 yet** (`iceberg-spark-runtime-4.2_2.13`
+   is not on Maven Central). Stay on Spark 4.1 until it exists, then re-verify
+   (including whether the SDP issue above is fixed there).
+
+5. **Companion code repository.** `COURSE.md` describes per-chapter git tags as
+   planned. A verified reference build of the finished project exists from this run
+   and could seed that repository.

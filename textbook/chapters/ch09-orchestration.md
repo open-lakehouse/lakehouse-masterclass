@@ -29,7 +29,7 @@ It's worth dwelling on why cron isn't enough, because "just use cron" is a tempt
 
 > **DAG** *(canonical term)*: a Directed Acyclic Graph, the pipeline's tasks and the dependency edges between them. "Directed" and "acyclic" mean work flows one way and never loops.
 
-In Airflow you express your pipeline as a DAG: each step is a task, and you declare which tasks must finish before others start. Airflow figures out the order, runs independent tasks in parallel, and stops a downstream task if its upstream failed. Our medallion is a natural DAG: `ingest_bronze` then `build_silver` then `build_gold`.
+In Airflow you express your pipeline as a DAG: each step is a task, and you declare which tasks must finish before others start. Airflow figures out the order, runs independent tasks in parallel, and stops a downstream task if its upstream failed. Our medallion is a natural DAG: `land_raw` then `ingest_bronze` then `build_silver` then `build_gold`.
 
 Let's unpack the jargon, because "Directed Acyclic Graph" sounds more intimidating than it is. A graph is just boxes (tasks) connected by arrows (dependencies). Directed means the arrows point one way: Bronze comes before Silver, not the reverse. Acyclic means no loops: you can't have Bronze depend on Gold which depends on Bronze, because then nothing could ever start. That's the whole concept: a set of tasks with one-way "must happen before" arrows and no circular waiting. Any pipeline you can draw as boxes-and-arrows-without-loops is a DAG, and Airflow's job is to run it correctly.
 
@@ -45,103 +45,284 @@ This separation of concerns is a design principle, not just a detail. Airflow is
 
 ## Build: a scheduled medallion DAG
 
-Airflow is the most involved service in the stack: it's really several processes (a scheduler, an API/web server, and a metadata database). Rather than hand-write all of that, start from Airflow's official `docker-compose.yaml` (the project publishes one) and adapt it into your stack. Four adaptations are what matter:
+Airflow is the most involved service in the stack: it is really several cooperating processes (a scheduler, an API server that also serves the UI, a DAG processor that parses your DAG files) plus a metadata database that records every run. Airflow publishes an official `docker-compose.yaml`, but it is built for a distributed CeleryExecutor setup with Redis, workers, and Flower, far more than a laptop needs, and adapting it by hand is where most people get stuck. So instead you'll write a small, complete version yourself, the same way you wrote every other service. It makes four decisions, and each one is worth understanding:
 
-1. **Join the same network.** Put the Airflow services on `lakehouse-network` so their tasks can reach `spark-connect:15002`, `seaweedfs:8333`, and `unity-catalog:8080` by service name.
-2. **Mount your DAGs folder.** Point Airflow's `dags/` volume at a `dags/` directory in your project so your DAG file is picked up.
-3. **Keep it small for local use.** `AIRFLOW__CORE__EXECUTOR=LocalExecutor` and `AIRFLOW__CORE__LOAD_EXAMPLES=false` keep the footprint sane on a laptop. The API/web UI comes up on port 8085.
-4. **Give the tasks what they call.** The DAG imports `lakehouse.ingest`, runs `spark-pipelines`, and talks to Spark Connect, all from inside the Airflow container, so that image needs three things: the client and pipelines extra installed (`pip install 'pyspark[pipelines]==4.1.0'`), your `lakehouse` package installed (`pip install -e .` against the mounted project, so `from lakehouse.ingest import ingest_orders` resolves), and your `pipelines/` directory mounted (for example at `/opt/pipelines`) so the SDP project is on disk where the task's working directory expects it. Set `_PIP_ADDITIONAL_REQUIREMENTS` or bake a custom Airflow image for the installs. Finally, set `SPARK_REMOTE=sc://spark-connect:15002` in the Airflow services' environment: that is the one env var `get_spark()` reads, so the reused Chapter 6 ingest reaches the in-network Connect server with no code change. (That is the whole point of centralizing the address in config: the identical function runs from your host and from inside Airflow, differing only by one env var.)
+1. **LocalExecutor, not Celery.** With `LocalExecutor`, the scheduler runs tasks as subprocesses inside its own container. No broker, no workers, no Redis. That is plenty for one machine.
+2. **A custom image, because the tasks call Spark.** The DAG imports your `lakehouse` package and runs `spark-pipelines`. That CLI is a JVM launcher under the hood (it starts `spark-class`), so the Airflow image needs a Java runtime, plus the Spark Connect client with the pipelines extra. The stock Airflow image has neither.
+3. **Your code is mounted, not copied.** `dags/`, `lakehouse/`, and `pipelines/` are mounted into the containers and `PYTHONPATH` points at them, so `from lakehouse.ingest import ingest_orders` resolves to the exact file you edit on your host. Change the ingest and the next run uses the change, no image rebuild.
+4. **In-network addresses.** Tasks run inside the Compose network, so they reach Spark at `sc://spark-connect:15002` and the catalog at `unity-catalog:8080`. Because `get_spark()` reads `SPARK_REMOTE` (Chapter 4), the identical ingest function runs from your host and from Airflow, differing only by one environment variable.
 
-Bring up the Airflow services and confirm the UI answers:
+**Step 1: the Airflow image.** Create `docker/airflow/Dockerfile`:
+
+```dockerfile
+# docker/airflow/Dockerfile
+# Airflow plus exactly what the medallion DAG calls: a JDK (spark-pipelines is a
+# JVM launcher), the Spark Connect client with the pipelines extra, and the rest
+# of the project's Python dependencies. The lakehouse package itself is mounted
+# at /opt/lakehouse and put on PYTHONPATH by Compose, so code edits are live.
+FROM apache/airflow:3.3.2-python3.12
+
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends default-jre-headless \
+ && rm -rf /var/lib/apt/lists/*
+# default-java is a symlink that exists on amd64 and arm64 (Apple Silicon) alike.
+ENV JAVA_HOME=/usr/lib/jvm/default-java
+
+USER airflow
+RUN pip install --no-cache-dir "apache-airflow==3.3.2" "pyspark[connect,pipelines]==4.1.0"
+```
+
+Pinning `apache-airflow==3.3.2` in the same `pip install` stops pip from quietly upgrading Airflow while it resolves PySpark's dependencies. `default-jre-headless` and the `default-java` path are chosen so the same file builds on an Intel laptop and an Apple Silicon Mac. (Dockerfile `ENV` lines can't carry a trailing comment, which is why the explanation sits on its own line above it.)
+
+**Step 2: secrets for Airflow.** Airflow needs a database password and a signing secret for the tokens its components exchange. They are secrets, so they go in `.env`, along with your user id so files Airflow writes into mounted folders are owned by you:
 
 ```bash
-docker compose up -d airflow-init airflow-scheduler airflow-apiserver
-docker compose ps
+echo "AIRFLOW_UID=$(id -u)" >> .env
+echo "AIRFLOW_DB_PASSWORD=airflow-local" >> .env
+echo "AIRFLOW_JWT_SECRET=$(openssl rand -hex 16)" >> .env
+```
+
+**Step 3: the Compose services.** Airflow's processes share almost all of their configuration, so define it once with a YAML anchor and reuse it. Put this block at the very top of `docker-compose.yml`, above `services:` (Compose ignores top-level keys that start with `x-`, which is exactly what makes them usable as anchors):
+
+```yaml
+x-airflow-common: &airflow-common
+  build: ./docker/airflow
+  image: open-lakehouse-airflow:3.3.2
+  user: "${AIRFLOW_UID:-50000}:0"
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@airflow-db/airflow
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"   # local only: no login screen
+    # The lakehouse package, reached the in-network way (Chapter 2's two-address rule):
+    PYTHONPATH: /opt/lakehouse
+    SPARK_REMOTE: sc://spark-connect:15002
+    CATALOG_URI: http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./lakehouse:/opt/lakehouse/lakehouse
+    - ./pipelines:/opt/lakehouse/pipelines
+  depends_on:
+    airflow-db:
+      condition: service_healthy
+  networks:
+    - lakehouse-network
+```
+
+Then add the services under `services:`:
+
+```yaml
+  airflow-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 10
+    networks:
+      - lakehouse-network
+
+  airflow-init:
+    <<: *airflow-common
+    command: db migrate                     # create/upgrade Airflow's metadata tables, then exit
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
+    ports:
+      - "8085:8080"                         # UI + REST API, at localhost:8085
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler                      # with LocalExecutor, tasks run inside this container
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor                  # parses dags/ (a separate process in Airflow 3)
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+```
+
+And add `airflow-db:` to the top-level `volumes:` list, so run history survives a restart.
+
+Read the dependency chain, because it encodes the startup order you'd otherwise have to babysit: the database must be healthy (`pg_isready`), then `airflow-init` runs the schema migration and exits, and only after it exits successfully do the long-running processes start. `<<: *airflow-common` pastes the shared block into each service; a service's own `depends_on` replaces the anchor's, which is why the long-running services list `airflow-init` (and inherit the database ordering through it). `SIMPLE_AUTH_MANAGER_ALL_ADMINS` turns off the login screen; it is a local-development convenience you would never ship.
+
+**Step 4: build and start it.**
+
+```bash
+docker compose up -d --build airflow-init airflow-apiserver airflow-scheduler airflow-dag-processor
+docker compose ps -a | grep airflow
 curl -s http://localhost:8085/api/v2/monitor/health
 ```
 
-**What just happened?** You started Airflow's cooperating processes: a scheduler that decides what runs when, an API/web server for the UI and REST calls, and a metadata database that records every run. Open `http://localhost:8085` in your browser. The UI is where orchestration stops being abstract: you can see your pipeline as a graph, watch runs succeed or fail, and drill into any task's logs. Spend a minute clicking around; the visibility the UI provides is half the reason orchestrators exist.
+The first build installs a JDK and PySpark into the image, so give it a few minutes. Expected: `airflow-db` is `healthy`, `airflow-init` shows `Exited (0)` (it did its one job), the other three are `Up`, and the health endpoint reports each component:
 
-**Step 2: write the DAG.** Save this as `dags/lakehouse_medallion_pipeline.py`. It schedules the pipeline daily, with retries, and expresses the medallion order. Note the Spark Connect address: these tasks run inside the Airflow container, so they reach the Connect server at the in-network name `spark-connect:15002`, not `localhost`.
+```json
+{"metadatabase":{"status":"healthy"},"scheduler":{"status":"healthy","latest_scheduler_heartbeat":"..."},"triggerer":{"status":null,"latest_triggerer_heartbeat":null},"dag_processor":{"status":"healthy","latest_dag_processor_heartbeat":"..."}}
+```
+
+The `triggerer` is `null` because we didn't start one; it only matters for deferrable operators, which this pipeline doesn't use.
+
+**What just happened?** You started Airflow's cooperating processes: a scheduler that decides what runs when (and, with LocalExecutor, runs it), an API server for the UI and REST calls, a DAG processor that parses your DAG files, and a metadata database that records every run. Open `http://localhost:8085` in your browser. The UI is where orchestration stops being abstract: you can see your pipeline as a graph, watch runs succeed or fail, and drill into any task's logs.
+
+**Step 5: write the DAG.** Save this as `dags/lakehouse_medallion_pipeline.py`:
 
 ```python
+# dags/lakehouse_medallion_pipeline.py
+import subprocess
 from datetime import datetime, timedelta
-from airflow import DAG
-from airflow.operators.python import PythonOperator
 
-from lakehouse.ingest import ingest_orders   # the SAME module you wrote in Chapter 6
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import DAG
+
+from lakehouse.generate import generate_orders   # Chapter 6: the stand-in source system
+from lakehouse.ingest import ingest_orders       # Chapter 6: the SAME ingest you ran by hand
 
 default_args = {
     "retries": 2,                          # transient failures auto-retry
-    "retry_delay": timedelta(minutes=5),
+    "retry_delay": timedelta(minutes=1),
 }
 
-def ingest_bronze(**ctx):
-    # Reuse the Chapter 6 ingest, passing the run's logical date (ds). Backfilling
-    # a past day lands that day's partition. No pipeline logic is re-implemented here.
-    ingest_orders(ingest_date=ctx["ds"])
 
-def build_silver_gold(**_):
-    # run the SDP medallion from Chapter 7 against the in-network Connect server
-    import subprocess
+def run_day(ctx) -> str:
+    """The day this run is responsible for, as YYYY-MM-DD.
+    Scheduled and backfill runs carry a logical date (the interval they cover).
+    In Airflow 3 a manual trigger has none unless you pass --logical-date, so fall
+    back to when the run was requested."""
+    when = ctx.get("logical_date") or ctx["dag_run"].run_after
+    return when.strftime("%Y-%m-%d")
+
+
+def land_raw(**ctx):
+    # Stand-in for the upstream system delivering that day's export. In production
+    # this task would not exist (the file would just arrive), or it would be a
+    # sensor that waits for the file.
+    generate_orders(run_day(ctx))
+
+
+def ingest_bronze(**ctx):
+    # A backfill run for 2026-01-03 gets "2026-01-03", so the ingest lands exactly
+    # that day's partition, using the same function you ran by hand.
+    ingest_orders(run_day(ctx))
+
+
+def refresh(dataset: str):
+    """Refresh one dataset of the Chapter 7 SDP project on the in-network Connect server."""
     subprocess.run(
-        ["spark-pipelines", "run", "--remote", "sc://spark-connect:15002"],
-        cwd="/opt/pipelines/medallion", check=True,
+        ["spark-pipelines", "run", "--remote", "sc://spark-connect:15002", "--refresh", dataset],
+        cwd="/opt/lakehouse/pipelines/medallion", check=True,
     )
+
 
 with DAG(
     dag_id="lakehouse_medallion_pipeline",
     start_date=datetime(2026, 1, 1),
     schedule="@daily",                      # run once a day
     catchup=False,                          # don't auto-run all history on deploy
+    max_active_runs=1,                      # one refresh of silver/gold at a time
     default_args=default_args,
 ) as dag:
+    t_raw = PythonOperator(task_id="land_raw", python_callable=land_raw)
     t_bronze = PythonOperator(task_id="ingest_bronze", python_callable=ingest_bronze)
-    t_silver_gold = PythonOperator(task_id="build_silver_gold", python_callable=build_silver_gold)
+    t_silver = PythonOperator(task_id="build_silver", python_callable=refresh,
+                              op_kwargs={"dataset": "silver.orders"})
+    t_gold = PythonOperator(task_id="build_gold", python_callable=refresh,
+                            op_kwargs={"dataset": "gold.daily_revenue"})
 
-    t_bronze >> t_silver_gold               # the dependency edge = the DAG
+    t_raw >> t_bronze >> t_silver >> t_gold      # the dependency edges = the DAG
 ```
 
-**What just happened?** The last line is the heart of it: `t_bronze >> t_silver_gold` literally draws the arrow of the DAG, "Bronze before the medallion transform." That `>>` operator is how Airflow expresses dependencies. Notice also `catchup=False`: without it, deploying a DAG with a `start_date` in the past would make Airflow immediately try to run every missed day since that date, a classic surprise that floods a new pipeline with hundreds of runs. And each task function is deliberately thin: `ingest_bronze` is one line that `import`s and calls the exact `ingest_orders` function you wrote in Chapter 6, not a copy of it, and `build_silver_gold` shells out to the Chapter 7 SDP project. This is the "conductor, not musician" principle made literal: the orchestrator sequences work it doesn't itself implement. Because the ingest is reused rather than reimplemented, there is one definition of "land Bronze" in the whole system; fix a bug in `lakehouse/ingest.py` and both your manual runs and the scheduled runs get the fix. And passing `ctx["ds"]` (the run's logical date) into that function is what makes the retries and backfills below actually correct. SDP still derives the Silver-then-Gold order internally, so Airflow only needs to sequence "ingest, then transform."
+**What just happened?** The last line is the heart of it: `t_raw >> t_bronze >> t_silver >> t_gold` literally draws the arrows of the DAG. Several details are worth slowing down for:
 
-**Step 3: trigger a run and watch the tasks go green in order.** From the UI's trigger button, or from the CLI inside the scheduler container:
+- **The imports are Airflow 3's.** `DAG` comes from `airflow.sdk` and `PythonOperator` from the standard provider. Older tutorials import `airflow.operators.python`; that path belongs to Airflow 2.
+- **`run_day()` answers "which day is this run for?"** Scheduled and backfill runs carry a *logical date*, the interval they cover, and that date is what makes retries and backfills correct: the run for January 3 always lands January 3, whenever it actually executes. Airflow 3 changed one thing here: a run you trigger by hand has *no* logical date unless you give it one, so code that reaches for `ctx["ds"]` (or takes `ds` as a parameter) fails on manual runs with `missing 1 required positional argument: 'ds'`. `run_day()` uses the logical date when there is one and falls back to when the run was requested.
+- **`land_raw` stands in for the source.** In production the day's export would simply arrive (or a sensor task would wait for it). Here the generator plays that role, so a backfill of a past day has raw data to ingest. Because the generator is seeded by date, the January 3 drop is identical every time it is produced.
+- **The tasks are thin.** `ingest_bronze` calls the exact `ingest_orders` you wrote in Chapter 6, not a copy. There is one definition of "land Bronze" in the whole system; fix a bug in `lakehouse/ingest.py` and both your manual runs and the scheduled runs get the fix.
+- **Silver and Gold are two tasks.** Chapter 7 explains why: with open-source SDP 4.1 on Iceberg, refreshing a materialized view and another one that reads it in the same run leaves the downstream one empty, so Silver and Gold are refreshed as separate steps. Sequencing steps is exactly the orchestrator's job, and splitting them gives you per-step retries and logs for free.
+- **`catchup=False` and `max_active_runs=1`.** Without `catchup=False`, deploying a DAG whose `start_date` is in the past makes Airflow immediately try to run every missed day, a classic surprise that floods a new pipeline with runs. `max_active_runs=1` keeps two scheduled runs from refreshing Silver and Gold at the same time.
+
+Within a few seconds of saving the file, the DAG processor picks it up. Because the Compose file sets `DAGS_ARE_PAUSED_AT_CREATION` to `false`, the DAG starts unpaused, and with `catchup=False` Airflow schedules exactly one run, for the most recent daily interval. That first run is expected; it's the scheduler doing its job. Check that the file parsed cleanly:
 
 ```bash
-docker compose exec airflow-scheduler airflow dags trigger lakehouse_medallion_pipeline
+docker compose exec airflow-scheduler airflow dags list
+docker compose exec airflow-scheduler airflow dags list-import-errors
 ```
 
-Expected: `ingest_bronze` runs first; only when it succeeds does `build_silver_gold` start. In the UI's graph view each task turns green in sequence. You can confirm the same thing without the UI, which is how you'd check it in a script or an alert:
+Expected: `lakehouse_medallion_pipeline` is listed, and the import-errors command prints `No data found`.
+
+**Step 6: trigger a run and watch the tasks go green in order.** From the UI's trigger button, or from the CLI inside the scheduler container. Give it a logical date so it lands a specific day:
 
 ```bash
 docker compose exec airflow-scheduler \
-    airflow dags list-runs -d lakehouse_medallion_pipeline
-# dag_id                        | run_id            | state   | ...
-# lakehouse_medallion_pipeline  | manual__2026-...  | success | ...
+    airflow dags trigger lakehouse_medallion_pipeline --logical-date 2026-01-08
 ```
 
-A `state` of `success` means both tasks ran in order and finished; `failed` or `running` tells you to open that run's task logs in the UI. (The exact column layout varies by Airflow version.)
+Expected: `land_raw` runs first, then `ingest_bronze`, then `build_silver`, then `build_gold`, each starting only after the one before it succeeds. In the UI's graph view the tasks turn green in sequence. You can confirm the same thing without the UI, which is how you'd check it in a script or an alert (in Airflow 3 the DAG id is a positional argument):
 
-**What just happened?** You watched dependency enforcement in action. The transform did not start until the ingest succeeded; if the ingest had failed, the transform would never have run, sparing you a pile of wrong downstream data. That "don't run downstream if upstream failed" behavior is exactly what cron can't do and what makes an orchestrated pipeline trustworthy.
+```bash
+docker compose exec airflow-scheduler airflow dags list-runs lakehouse_medallion_pipeline
+```
+
+A `state` of `success` for the run means all four tasks finished in order; `failed` or `running` tells you to open that run's task logs in the UI. The task timeline from a verification run looks like this, each task starting seconds after the previous one finished:
+
+```
+land_raw       success  12:22:35
+ingest_bronze  success  12:22:39
+build_silver   success  12:22:42
+build_gold     success  12:22:48
+```
+
+Then confirm the data, not just the green boxes:
+
+```python
+from lakehouse.session import get_spark
+spark = get_spark()
+spark.sql("SELECT order_date, sum(order_count) AS orders FROM iceberg.gold.daily_revenue "
+          "GROUP BY order_date ORDER BY order_date").show()
+```
+
+Expected: a row for `2026-01-08` has appeared alongside the days you loaded by hand.
+
+**What just happened?** You watched dependency enforcement in action. Gold did not refresh until Silver had, and Silver did not refresh until the ingest succeeded; if the ingest had failed, nothing downstream would have run, sparing you a pile of wrong data. That "don't run downstream if upstream failed" behavior is exactly what cron can't do and what makes an orchestrated pipeline trustworthy.
 
 ## Retries and backfills: the production payoff
 
-**Retries.** With `retries: 2`, a task that hits a transient error (a momentary storage blip) is retried automatically before the run is marked failed. You wake up to a green pipeline, not a 2 a.m. page. This only works safely because your tasks are idempotent (Chapter 6): a retry re-runs the task, and idempotency guarantees that re-running doesn't duplicate data. Retries and idempotency are a team: retries give you automatic recovery, idempotency makes that recovery safe. Neither is much use without the other.
+**Retries.** With `retries: 2`, a task that hits a transient error (a momentary storage blip, the Connect server restarting) is retried automatically before the run is marked failed. You wake up to a green pipeline, not a 2 a.m. page. This only works safely because your tasks are idempotent (Chapter 6): a retry re-runs the task, and idempotency guarantees that re-running doesn't duplicate data. Retries and idempotency are a team: retries give you automatic recovery, idempotency makes that recovery safe. Neither is much use without the other.
 
 > **Backfill** *(canonical term)*: running a pipeline over past dates to populate or re-populate history.
 
-**Backfill.** Suppose you fixed a Gold aggregation and need last week re-computed. Because each Airflow run is tied to a date (its "logical date"), you can backfill a range and Airflow runs one pipeline execution per day in that window. You can start a backfill from the UI, or from the CLI inside the scheduler container:
+**Backfill.** Suppose you fixed a Gold aggregation and need last week re-computed, or you are standing up the pipeline and want history. Because each run is tied to a logical date, you can backfill a range and Airflow creates one run per day in that window. In Airflow 3 that's the `backfill create` command:
 
 ```bash
 docker compose exec airflow-scheduler \
-    airflow dags backfill --start-date 2026-01-01 --end-date 2026-01-07 \
-    lakehouse_medallion_pipeline
+    airflow backfill create --dag-id lakehouse_medallion_pipeline \
+    --from-date 2026-01-01 --to-date 2026-01-07 --max-active-runs 1
 ```
 
-(The exact backfill flags shift between Airflow versions; if the CLI rejects them, the UI's backfill form is the version-proof path.)
+(Airflow 2's `airflow dags backfill` no longer exists. The UI's backfill dialog does the same thing as this command.)
 
-Expected: seven dated runs execute, each re-deriving that day's Silver/Gold from the untouched Bronze, the payoff of the ELT and idempotency choices from Chapter 6.
+Expected: one run per day, `backfill__2026-01-01...` through `backfill__2026-01-07...`, executing one after another. Each lands its own day's raw drop, overwrites exactly that day's Bronze partition, and refreshes Silver and Gold. Re-running a range you already backfilled needs `--reprocess-behavior completed`, which tells Airflow to redo days that already succeeded; because every task is idempotent, the result is identical.
 
-**What just happened?** This is where several earlier chapters' decisions pay a dividend at once. You changed some logic and needed to fix a week of history. Because Bronze is a faithful permanent record (ELT, Chapter 6), the raw data is still there to re-derive from. Because each run is idempotent, re-running those seven days overwrites cleanly instead of duplicating. And because Airflow ties runs to dates, "redo January 1 to 7" is one command. A backfill that would have been a terrifying manual data-surgery operation in a fragile system is routine here. That's the whole architecture working together.
+**Don't drop `--max-active-runs 1`.** It looks like a tuning knob; it is a correctness setting. A backfill has its own concurrency limit, separate from the DAG's `max_active_runs`, and by default it starts many days at once. When that happens here, several runs refresh Silver and Gold simultaneously, each one resetting the table and inserting into it, and the writes interleave. In verification, an unbounded seven-day backfill left Silver at 30744 rows (four times the real count, because overlapping inserts stacked up) and Gold empty, with every task green. The orchestrator reported success on corrupted data. Running one day at a time removes the overlap, and the counts come out right. The general lesson outlives this pipeline: parallel runs are only safe for tasks that don't write the same table.
+
+**What just happened?** This is where several earlier chapters' decisions pay a dividend at once. You needed a week of history. Because each day's raw drop is addressable by date and the ingest overwrites only that day's partition (Chapter 6), each run touched exactly its own slice of Bronze. Because each run is idempotent, re-running a day overwrites cleanly instead of duplicating. And because Airflow ties runs to dates, "redo January 1 to 7" is one command. A backfill that would have been a terrifying manual data-surgery operation in a fragile system is routine here. (The streaming job from Chapter 8 can keep running throughout: its rows live in `_source = 'orders-stream'` partitions, which a batch overwrite never touches.)
 
 ## Troubleshooting
 
@@ -150,19 +331,25 @@ Expected: seven dated runs execute, each re-deriving that day's Silver/Gold from
 - **On deploy, Airflow runs a flood of past dates.** You forgot `catchup=False` (or set it `True`) with a past `start_date`. Set `catchup=False` unless you genuinely want automatic historical runs.
 - **A task fails but downstream runs anyway.** You wired the dependencies wrong. Confirm the `>>` chain reflects the real order; a missing edge lets tasks run independently.
 - **Retries make duplicate data.** Your task isn't idempotent. Revisit Chapter 6; retries are only safe on idempotent tasks.
-- **Backfill does nothing or errors.** Check the date range and that the DAG's `start_date` precedes it; Airflow won't run logical dates before `start_date`.
+- **Backfill does nothing or errors.** Check the date range and that the DAG's `start_date` precedes it; Airflow won't run logical dates before `start_date`. If the days already ran successfully, add `--reprocess-behavior completed` to redo them.
+- **`airflow dags backfill`: invalid choice.** That is the Airflow 2 command. Airflow 3 uses `airflow backfill create --dag-id ... --from-date ... --to-date ...`.
+- **Every task is green but Silver has several times too many rows and Gold is empty.** Runs overlapped. A backfill without `--max-active-runs 1` refreshes Silver and Gold from several runs at once. Re-run the range with `--max-active-runs 1 --reprocess-behavior completed`.
+- **A manually triggered run fails with `missing 1 required positional argument: 'ds'` or `KeyError: 'ds'`.** In Airflow 3 a manual run has no logical date. Use the `run_day()` helper from the DAG above, or trigger with `--logical-date YYYY-MM-DD`.
+- **`build_silver` fails with `java: not found` or `JAVA_HOME is not set`.** The scheduler is running the stock Airflow image. `spark-pipelines` needs the JDK baked into `docker/airflow/Dockerfile`; rebuild with `docker compose up -d --build airflow-scheduler`.
+- **`ModuleNotFoundError: No module named 'lakehouse'` in a task.** The mounts or `PYTHONPATH` are missing from the service. Every Airflow service inherits them from `x-airflow-common`; check that the service has `<<: *airflow-common`.
+- **`airflow-init` exits non-zero.** Usually the database password in `.env` changed after `airflow-db` first initialized its volume. Postgres only reads `POSTGRES_PASSWORD` the first time; put the original back (or, if the Airflow history is disposable, remove just the `airflow-db` volume).
 
 ## Checkpoint
 
 - `docker compose ps` shows the Airflow services healthy; the UI opens on 8085.
-- The `lakehouse_medallion_pipeline` DAG shows `ingest_bronze` then `build_silver_gold`.
+- The `lakehouse_medallion_pipeline` DAG shows `land_raw` then `ingest_bronze` then `build_silver` then `build_gold`, with no import errors.
 - A triggered run turns the tasks green in dependency order.
-- `retries` are configured, and you ran a backfill over a date range.
+- `retries` are configured, and you ran a backfill over a date range with `--max-active-runs 1`, then confirmed every backfilled day appears in Gold.
 - You can explain why cron is insufficient and what "DAG" means.
 
 ## Try it yourself
 
-1. **Force a failure.** Make the transform task raise an error on purpose, trigger the DAG, and confirm the run stops there. Then fix it and re-run. That's dependency enforcement protecting you.
+1. **Force a failure.** Make `build_silver` raise an error on purpose (for example, point `refresh` at a dataset name that doesn't exist), trigger the DAG, and confirm the run stops there. Then fix it and re-run. That's dependency enforcement protecting you.
 2. **Watch retries.** Make a task fail intermittently (fail the first attempt), and watch Airflow retry it per your `retries` setting before giving up.
 3. **Backfill and verify.** Backfill a three-day range and confirm each day's Gold was re-derived. Check that running the backfill twice doesn't duplicate data (idempotency plus orchestration together).
 4. **Draw your own DAG.** Sketch the DAG you'd build if Gold had two independent downstream tables (say, a dashboard export and a model-training trigger). Which tasks could run in parallel?

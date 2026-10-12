@@ -37,8 +37,8 @@ The loop in Figure 12.2 is the beating heart of every agent, and it's worth nami
 
 Two things make this lakehouse operable by an agent without inventing anything:
 
-1. **A small, uniform set of interfaces.** Lifecycle is `docker compose up/down/ps`. The pipeline is `spark-pipelines run`. Querying is SQL over Spark Connect. An agent that can run shell commands and issue SQL can operate the whole platform, and `docker compose ps` (optionally `--format json`) gives it machine-readable state to reason over.
-2. **Documented, predictable structure.** The project has a README, a single `docker-compose.yml`, and a known layout (the `compose/`, `config/`, `pipelines/` folders from Chapter 2). A coding agent reads those the same way a new teammate would, and follows a proven path instead of improvising. If you want to make this explicit, drop an `AGENTS.md` at the repo root describing how to run and verify each piece.
+1. **A small, uniform set of interfaces.** Lifecycle is `docker compose up/down/ps`. The pipeline is `spark-pipelines run`, wrapped in a `make pipeline` target (Chapter 13). Querying is SQL over Spark Connect. An agent that can run shell commands and issue SQL can operate the whole platform, and `docker compose ps` (optionally `--format json`) gives it machine-readable state to reason over.
+2. **Documented, predictable structure.** The project has a README, a single `docker-compose.yml`, and a known layout (the `lakehouse/` package plus the `config/`, `pipelines/`, `dags/`, and `ml/` folders from Chapter 2). A coding agent reads those the same way a new teammate would, and follows a proven path instead of improvising. If you want to make this explicit, drop an `AGENTS.md` at the repo root describing how to run and verify each piece.
 
 Here's the deeper lesson, and it's one that will make you a better engineer whether or not you ever deploy an agent: the qualities that make a system agent-friendly are the same qualities that make it human-friendly. A small consistent set of commands, machine-readable status output, and clear written procedures are things you'd want for yourself and your teammates. It's no accident that the well-designed lakehouse is also the agent-operable one. Building for clarity, few front doors, predictable outputs, documented procedures, pays off twice: humans onboard faster, and agents can drive it. If there's one takeaway from this chapter beyond "agents are cool," it's that good structure is the real enabler.
 
@@ -56,26 +56,29 @@ When your documentation is consistent and complete enough that an agent can foll
 ## Services (all on the `lakehouse-network` Docker network)
 - seaweedfs       object store, S3 API   host: localhost:8333  in-net: seaweedfs:8333
 - spark-connect   Spark Connect (gRPC)   host: localhost:15002 in-net: spark-connect:15002
-- unity-catalog   Iceberg REST catalog   host: localhost:8081
-- (airflow, mlflow) orchestration + model tracking, when running
+- unity-catalog   Iceberg REST catalog   host: localhost:8081  in-net: unity-catalog:8080
+- kafka           event stream           host: localhost:29092 in-net: kafka:9092
+- airflow-apiserver  orchestration UI/API  host: localhost:8085
+- mlflow          model tracking         host: localhost:5000
 
-## How to operate
-- Lifecycle:  `docker compose up -d <svc>` / `docker compose ps` / `docker compose down`
-- Generate + ingest Bronze:  `python -m lakehouse.generate` then `python -m lakehouse.ingest <YYYY-MM-DD>`
-- Run the batch pipeline:  `cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002`
-- Train the model:  `python ml/train.py`
-- Run the tests:  `pytest tests/`
-- Query data:  SQL over Spark Connect at `sc://localhost:15002`; tables are `iceberg.bronze.*`, `iceberg.silver.*`, `iceberg.gold.*`
-- Shortcuts for all of the above live in the `Makefile` (`make up`, `make ingest`, `make pipeline`, `make test`, `make down`)
+## How to operate (prefer the Makefile targets)
+- Health:     `make ps` (or `docker compose ps --format json` for machine-readable state)
+- Lifecycle:  `make up` / `make down`
+- Bronze:     `make ingest DATE=YYYY-MM-DD` (idempotent: re-running a date replaces only that date)
+- Silver+Gold: `make pipeline` (refreshes silver.orders, then gold.daily_revenue)
+- Tests:      `make test`        Train: `make train`
+- Query:      SQL over Spark Connect (`from lakehouse.session import get_spark`);
+              tables are iceberg.bronze.orders_raw, iceberg.silver.orders, iceberg.gold.daily_revenue
+- Snapshots:  `python -c "from lakehouse.catalog import print_snapshots; print_snapshots('gold','daily_revenue')"`
 
 ## Guardrails (do NOT violate without explicit human confirmation)
 - Never run `docker compose down -v` (deletes all data volumes).
-- Never `DROP TABLE` or delete a stream checkpoint.
-- Prefer read-only SQL (`SELECT`); confirm before any write or DDL.
-- Always `docker compose ps` to check health before and after lifecycle changes.
+- Never `DROP TABLE`, delete objects under s3://lakehouse/, or delete a stream checkpoint.
+- Prefer read-only SQL (`SELECT`, `SHOW`, `DESCRIBE`); confirm before any write or DDL.
+- Run `make ps` before and after any lifecycle change, and report what changed.
 ```
 
-This file is the agent's API. Everything in it, service names, ports, the pipeline command, the catalog's table names, is something you built and verified in earlier chapters; you're just writing it down where an agent (or a new teammate) will read it first.
+This file is the agent's API. Everything in it, service names, ports, the `make` targets, the catalog's table names, is something you built and verified in earlier chapters; you're just writing it down where an agent (or a new teammate) will read it first. It points at the `Makefile` targets rather than raw commands on purpose: `make pipeline` already knows that Silver and Gold refresh as two steps (Chapter 7), so the agent can't get that ordering wrong. (The `Makefile` itself is in Chapter 13; write it now if you're following along with an agent.) The guardrails are specific rather than vague. "Be careful" gives an agent nothing to check; "never `docker compose down -v`" and "never delete objects under `s3://lakehouse/`" are rules it can test a command against before running it.
 
 **Step 2: give it a plain-English goal.**
 
@@ -87,11 +90,13 @@ You: Bring up the lakehouse stack, run the batch medallion pipeline,
 **Step 3: watch the agent operate.** It plans and calls tools in sequence, observing each result before the next step:
 
 ```text
-agent -> docker compose up -d seaweedfs spark-connect unity-catalog   # bring up the stack
-agent -> docker compose ps                                            # confirm healthy
-agent -> cd pipelines/medallion && spark-pipelines run --remote sc://localhost:15002   # run the medallion
-agent -> (SQL over sc://localhost:15002) SELECT * FROM iceberg.gold.daily_revenue ORDER BY order_date
-agent -> "Here's daily revenue by status: ..."                        # reports back
+agent -> make ps                       # what's running? (reads state before acting)
+agent -> make up                       # bring the stack up
+agent -> make ps                       # confirm every service is Up before continuing
+agent -> make pipeline                 # refresh Silver, then Gold
+agent -> (SQL over sc://localhost:15002) SELECT order_date, status, revenue, order_count
+         FROM iceberg.gold.daily_revenue ORDER BY order_date, status
+agent -> "Here's daily revenue by status: ..."   # reports back
 ```
 
 Expected: the agent brings the stack up, runs the pipeline you built in Chapter 7, reads the Gold table through the catalog, and summarizes the numbers, all from one English instruction, using only the tools you already have.
@@ -101,12 +106,21 @@ Expected: the agent brings the stack up, runs the pipeline you built in Chapter 
 Then verify it, because trusting an agent blindly is the whole danger. Run the agent's final query yourself and confirm the numbers match what it reported:
 
 ```python
-spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
+from lakehouse.session import get_spark
+get_spark().table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
 ```
+
+For a second, engine-independent check, ask the catalog which snapshot of Gold you're looking at, and confirm the agent's pipeline run actually produced a new one:
+
+```bash
+python -c "from lakehouse.catalog import print_snapshots; print_snapshots('gold', 'daily_revenue')"
+```
+
+The newest snapshot (marked `*`) should be an `append` committed at the time the agent ran `make pipeline`. If the newest one predates the agent's run, the pipeline didn't do what the agent said it did.
 
 The rows should be exactly what the agent summarized. This is the habit to keep even once agents are doing the work: the lakehouse gives you an independent way to check the agent's claim (the same catalog, the same table), so the agent is a fast operator you can audit, not an oracle you have to believe.
 
-**Step 4: try a follow-up that requires adaptation,** for example "now tear it all down cleanly." The agent runs `docker compose down`, checking `docker compose ps` before and after, planning and verifying, not just firing commands.
+**Step 4: try a follow-up that requires adaptation,** for example "now tear it all down cleanly." The agent runs `make down`, checking `make ps` before and after, planning and verifying, not just firing commands. Notice what it should *not* do: reach for `docker compose down -v` to be "thorough". That's the guardrail in `AGENTS.md` earning its place.
 
 **What just happened?** The follow-up shows the observe step earning its keep. A good agent checks state before tearing down (what's actually running?) and after (did it stop cleanly?), rather than blindly firing a command and hoping. That verify-don't-assume behavior is exactly what you'd want a careful human operator to do, and it's why machine-readable status output is such an important part of making the lakehouse agent-ready.
 
@@ -132,13 +146,13 @@ The principle uniting these is least privilege plus reversibility: give the agen
 
 - You pointed an agent at the repo; it read the README and Compose file for instructions.
 - From one English goal, the agent brought up the stack, ran the medallion, and reported Gold results using `docker compose`, `spark-pipelines`, and SQL.
-- It used `docker compose ps` to verify state before and after actions.
+- It used `make ps` (or `docker compose ps`) to verify state before and after actions.
 - You can name three guardrails that keep agent operation safe.
 - You can explain why the qualities that make a system agent-ready also make it human-friendly.
 
 ## Try it yourself
 
-1. **Give it a multi-step goal.** Ask the agent to generate fresh data (the Chapter 6 producer), run the pipeline, and report the top revenue day. Watch how it sequences and verifies each step.
+1. **Give it a multi-step goal.** Ask the agent to land a new day (`make ingest DATE=2026-01-10`), rebuild Silver and Gold, and report the top revenue day. Then check its claim yourself with one query. Watch how it sequences and verifies each step.
 2. **Watch it recover.** Stop a service the agent will need, then give it a goal that requires it. Observe whether it notices the unhealthy state (via `docker compose ps`) and reacts, versus barreling ahead.
 3. **Tighten a guardrail.** Decide which commands you'd never let an agent run without confirmation, and write down the rule. You've just designed an agent safety policy.
 4. **Reflect on the meta-lesson.** In a paragraph, explain why building the lakehouse behind a few clean interfaces made this whole chapter possible, and how that same choice helps human operators.

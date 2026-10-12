@@ -97,6 +97,10 @@ services:
       AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY}
       AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY}
       AWS_REGION: us-east-1
+      # Optional: cap what this worker offers. By default it claims every core and
+      # nearly all the memory of your machine. Uncomment on a laptop:
+      # SPARK_WORKER_CORES: "4"
+      # SPARK_WORKER_MEMORY: "6g"
     command: >
       bash -c "/opt/spark/sbin/start-worker.sh spark://spark-master:7077 &&
                tail -f /opt/spark/logs/*"
@@ -134,20 +138,29 @@ Step 1b. Create the Connect server's static config. Because a thin client cannot
 # config/spark/spark-defaults.conf  (read by the Connect server at startup)
 
 # Jars for Iceberg, its AWS/S3 support, and Kafka (used in Chapters 5-8).
-spark.jars.packages      org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.12.0,org.apache.iceberg:iceberg-aws-bundle:1.12.0,org.apache.hadoop:hadoop-aws:3.4.1,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0
+spark.jars.packages      org.apache.iceberg:iceberg-spark-runtime-4.1_2.13:1.12.0,org.apache.iceberg:iceberg-aws-bundle:1.12.0,org.apache.hadoop:hadoop-aws:3.4.2,org.apache.spark:spark-sql-kafka-0-10_2.13:4.1.0
+# The image runs as user "spark" whose HOME is /nonexistent, so point Ivy (the
+# jar downloader) at a writable directory or the server dies at startup.
+spark.jars.ivy           /tmp/.ivy2
 spark.sql.extensions     org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
 
 # Reach SeaweedFS over the S3 API, with path-style addressing and env-var creds.
 spark.hadoop.fs.s3a.endpoint                  http://seaweedfs:8333
 spark.hadoop.fs.s3a.path.style.access         true
-spark.hadoop.fs.s3a.aws.credentials.provider  org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider
+spark.hadoop.fs.s3a.aws.credentials.provider  software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider
 
 # Iceberg's S3FileIO and the AWS SDK v2 both require a region, even against
 # SeaweedFS; it is supplied by the AWS_REGION env var on the Spark services.
 spark.sql.catalog.iceberg.s3.region           us-east-1
 ```
 
-You will add the catalog's own lines to this same file in Chapter 5. For now it gives the Connect server the Iceberg and S3 jars and tells Spark how to reach SeaweedFS, so the first time you create a table (next chapter) the engine is already wired for it. The first `up` after adding packages takes longer, since the Connect server downloads those jars from Maven once at startup.
+You will add the catalog's own lines to this same file in Chapter 5. For now it gives the Connect server the Iceberg and S3 jars and tells Spark how to reach SeaweedFS, so the first time you create a table (next chapter) the engine is already wired for it. Three lines in it are the kind of detail that costs an afternoon when it's wrong, so here is what each one is protecting you from:
+
+- **`spark.jars.ivy /tmp/.ivy2`.** `spark.jars.packages` is resolved by Ivy, which downloads jars into a cache under the user's home directory. The official image runs Spark as the user `spark`, whose home is `/nonexistent`. Without this line the Connect server dies at startup with `java.io.FileNotFoundException: /nonexistent/.ivy2.5.2/cache/resolved-org.apache.spark-spark-submit-parent-....xml (No such file or directory)`, and `docker compose ps` shows it exiting.
+- **`hadoop-aws:3.4.2`.** `hadoop-aws` is the S3A connector behind every `s3a://` path, and it must match the Hadoop version Spark was built with. Spark 4.1.0 ships `hadoop-client-api-3.4.2.jar`; a different `hadoop-aws` version drags in a mismatched AWS SDK and produces classpath errors that are hard to trace back to a version number.
+- **The credentials provider.** Hadoop 3.4's S3A connector is built on AWS SDK v2, so the class that reads `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the environment is the SDK's own `software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider`. The older name you'll find in many blog posts, `org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider`, does not exist in Hadoop 3.4 and fails the first `s3a://` read with `ClassNotFoundException`.
+
+Because the Ivy cache lives in `/tmp` inside the container, the Connect server downloads the jars every time the container is created (a `restart` keeps them; a `down`/`up` or a config change that recreates the container fetches them again). That makes the first start after a recreate noticeably slower; it's normal.
 
 Step 2. Bring the new services up:
 
@@ -159,26 +172,34 @@ docker compose ps
 Expected: `docker compose ps` now shows four services, all up:
 
 ```
-NAME            IMAGE                                             STATUS         PORTS
-seaweedfs       chrislusf/seaweedfs:3.80                          Up 2 minutes   0.0.0.0:8333->8333/tcp
-spark-master    apache/spark:4.1.0-scala2.13-java21-...-ubuntu    Up 40 seconds  0.0.0.0:8080->8080/tcp
-spark-worker    apache/spark:4.1.0-scala2.13-java21-...-ubuntu    Up 38 seconds
-spark-connect   apache/spark:4.1.0-scala2.13-java21-...-ubuntu    Up 35 seconds  0.0.0.0:15002->15002/tcp
+NAME                             SERVICE         STATUS          PORTS
+open-lakehouse-seaweedfs-1       seaweedfs       Up 2 minutes    ..., 0.0.0.0:8333->8333/tcp, ...
+open-lakehouse-spark-connect-1   spark-connect   Up 35 seconds   0.0.0.0:15002->15002/tcp
+open-lakehouse-spark-master-1    spark-master    Up 40 seconds   0.0.0.0:8080->8080/tcp
+open-lakehouse-spark-worker-1    spark-worker    Up 38 seconds
 ```
 
-The first `up` pulls the Spark image, which is large, so give it a minute. The worker publishes no host port on purpose: nothing on your laptop talks to it directly, only the master and Connect server do, over the network, by service name.
+The first `up` pulls the Spark image, which is large, so give it a minute. "Up" for `spark-connect` only means the container started; the gRPC endpoint is ready once its log says so. Wait for that line rather than guessing:
+
+```bash
+until docker compose logs spark-connect | grep -q "Spark Connect server started"; do sleep 3; done
+docker compose logs spark-connect | grep "Spark Connect server started"
+# ... INFO SparkConnectServer: Spark Connect server started at: [::]:15002
+```
+
+If the container keeps exiting instead, `docker compose logs spark-connect` will almost always show one of the three problems explained under Step 1b. The worker publishes no host port on purpose: nothing on your laptop talks to it directly, only the master and Connect server do, over the network, by service name.
 
 **What just happened?** You started three related things: a Spark master (the coordinator that hands out work), a worker (the process that actually runs tasks), and the Connect server (the gRPC endpoint your thin client will talk to). The master and worker are the "kitchen," and the Connect server is the "waiter" taking your orders. All three run in containers on the same network as your storage, so in later chapters Spark will reach the object store at `seaweedfs:8333` by service name.
 
 Step 3. Open the Spark UI to see the cluster. Visit `http://localhost:8080` in your browser, this is the standalone master's UI. Three things are worth reading on this page, because they tell you the cluster is actually healthy:
 
-- **Workers.** You should see exactly one worker with state `ALIVE`, along with its cores and memory (for example `4 Cores, 4.0 GiB`). If the worker is missing or `DEAD`, the worker never registered, check `docker compose logs spark-worker`.
-- **Running Applications.** You'll see one running application: the Connect server itself, which registered with the master at startup (a name like `Spark Connect server`). That is the long-lived application your thin client's work runs inside.
+- **Workers.** You should see exactly one worker with state `ALIVE`, along with the cores and memory it offers. Unless you set `SPARK_WORKER_CORES`/`SPARK_WORKER_MEMORY`, that's all of your machine's cores and nearly all its RAM, which is fine for one person's experiments but worth capping if your laptop gets sluggish. If the worker is missing or `DEAD`, the worker never registered, check `docker compose logs spark-worker`.
+- **Running Applications.** You'll see one running application: the Connect server itself, which registered with the master at startup under the name `Spark Connect server`. That is the long-lived application your thin client's work runs inside.
 - **Cores / Memory in use.** The header shows how much of the cluster is claimed. The Connect server holds some; the rest is free for your jobs.
 
-(Exact labels and the application's displayed name vary by Spark build; confirm them on your running UI.) The Spark UI is one of the most useful debugging tools you have: it shows running jobs, how work was split into tasks, and where time is spent. Get in the habit of opening it; when a job is mysteriously slow later, the UI usually shows why (one partition doing all the work, a stage retrying, and so on). Keep this tab open, you'll come back to it the moment you run a job.
+The same facts are available as JSON at `http://localhost:8080/json/`, which is handy in scripts (and for an agent in Chapter 12): `curl -s localhost:8080/json/ | python3 -m json.tool | grep -E '"state"|"name"'`. The Spark UI is one of the most useful debugging tools you have: it shows running jobs, how work was split into tasks, and where time is spent. Get in the habit of opening it; when a job is mysteriously slow later, the UI usually shows why (one partition doing all the work, a stage retrying, and so on). Keep this tab open, you'll come back to it the moment you run a job.
 
-Step 4. Connect a thin client and run your first job. From your host, in a Python environment with `pyspark` installed. Pin it to match the server (`pip install 'pyspark==4.1.0'`), since a bare `pip install pyspark` now pulls a newer release than the 4.1.0 cluster, and a version skew between client and server causes confusing errors:
+Step 4. Connect a thin client and run your first job. From your host, inside the project's virtual environment from Chapter 2 (`source .venv/bin/activate`), where `pip install -e .` already installed `pyspark[connect]==4.1.0`. The pin matters twice over: the `[connect]` extra brings the client's pandas, PyArrow, and gRPC dependencies, and the exact version keeps the client in step with the 4.1.0 server, since a bare `pip install pyspark` now pulls a newer release and version skew causes confusing errors. Save this as `data/first_job.py` (scratch space, not part of the package) or paste it into a `python` prompt:
 
 ```python
 from pyspark.sql import SparkSession
@@ -215,6 +236,19 @@ print(spark.version)   # -> 4.1.0  (the SERVER's version, not your local pyspark
 spark.range(2_000_000).selectExpr("id % 10 AS bucket").groupBy("bucket").count().orderBy("bucket").show()
 ```
 
+Expected: ten buckets of exactly `200000` rows each:
+
+```
++------+------+
+|bucket| count|
++------+------+
+|     0|200000|
+|     1|200000|
+...
+|     9|200000|
++------+------+
+```
+
 The version you print is whatever the Connect server runs, so even if your local `pyspark` were a different build, this returns `4.1.0`, the remote engine answered. Now go back to the Spark UI tab from Step 3 and refresh it. Click into the running `Spark Connect server` application: you'll see the jobs you just ran, each split into tasks across the worker's cores, with timings. That is the direct, visual payoff of this chapter, your one-line `.remote(...)` client handed work to a real distributed engine, and the UI shows that engine doing it. (If the per-application job view isn't reachable in your setup, the master page still shows the application as active with cores in use; the detailed job/stage view lives on the application's own UI.)
 
 Step 5. Point the client somewhere else without changing code, using an environment variable or URL parameters:
@@ -242,6 +276,8 @@ SPARK_REMOTE = os.environ.get("SPARK_REMOTE", "sc://localhost:15002")
 CATALOG      = os.environ.get("LAKEHOUSE_CATALOG", "iceberg")  # used from Chapter 5 on
 ```
 
+This file grows as the stack does: Chapter 5 adds `CATALOG_URI` (the catalog's REST address), Chapter 6 adds `RAW_PREFIX` (where raw files land), and Chapter 8 adds the Kafka addresses and the streaming checkpoint location. Every one follows the same pattern, an environment variable with a local default, which is what lets Chapter 9 run the identical code inside Airflow by setting a few variables.
+
 Then a session factory in `lakehouse/session.py`:
 
 ```python
@@ -265,6 +301,8 @@ spark = get_spark("first-job")
 spark.range(5).show()
 ```
 
+Run it from any directory with the virtual environment active and you get the same five rows as Step 4. It works from anywhere because `pip install -e .` put the package on your environment's path, not because you happen to be in the project folder.
+
 **What just happened?** You turned a one-off connection into project infrastructure. From here on you will not see `SparkSession.builder.remote(...)` again; every chapter starts with `from lakehouse.session import get_spark`. That is the difference between a pile of demo scripts and a codebase: shared setup lives in one tested place, and the environment (laptop versus cloud) is a config concern, not a code concern. This is the first module in your `lakehouse` package, and the pattern, write it once, import it everywhere, is what makes the rest of the course compound instead of repeat.
 
 Step back and look at what you've stood up. Your stack is now two layers deep: the object store from Chapter 3, and a Spark cluster you drive over `sc://` from a thin client. Storage and compute are separate services on the same network, exactly as the lakehouse promises, and every layer above (tables, ingestion, transformation) will run on this same engine.
@@ -279,7 +317,10 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 
 ## Troubleshooting
 
-- **Client hangs or "connection refused" on `sc://localhost:15002`.** The Connect server isn't up yet, or is still starting. Run `docker compose ps` to confirm `spark-connect` is running, and `docker compose logs spark-connect` to see why if it isn't. On the first `up` it can take a minute to download the `spark-connect` package.
+- **Client hangs or "connection refused" on `sc://localhost:15002`.** The Connect server isn't up yet, or is still starting. Run `docker compose ps` to confirm `spark-connect` is running, and `docker compose logs spark-connect` to see why if it isn't. After any recreate it first downloads the Iceberg, AWS, and Kafka jars listed in `spark.jars.packages`, which can take a minute; wait for `Spark Connect server started` in its log.
+- **`spark-connect` exits immediately with `FileNotFoundException: /nonexistent/.ivy2...`.** The `spark.jars.ivy /tmp/.ivy2` line is missing from `spark-defaults.conf`, or the file isn't mounted (check the `volumes:` path). See Step 1b.
+- **`PySparkImportError: [PACKAGE_NOT_INSTALLED] Pandas >= 2.2.0 must be installed`.** You installed bare `pyspark` instead of `pyspark[connect]`, or you're outside the project's virtual environment. Activate `.venv` and run `pip install -e .` again.
+- **`ClassNotFoundException: org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider`** (it surfaces in Chapter 6, on the first `s3a://` access). Your config still names the Hadoop 3.3-era provider; use the AWS SDK v2 class shown in Step 1b and restart `spark-connect`.
 - **`pyspark.errors.exceptions.connect.*` traceback.** That's a Connect-style error; the last line is usually the real message. Read it before scrolling up through the gRPC noise.
 - **Code fails with something about `sparkContext` or RDDs.** You're using an API Connect doesn't expose. Rewrite it in DataFrame or SQL terms; there's almost always a direct equivalent.
 - **`CANNOT_MODIFY_STATIC_CONFIG`.** You tried to set a static config from the client. It has to be set server-side, in the mounted `spark-defaults.conf`; you'll see how in Chapter 5.
@@ -288,7 +329,7 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 
 ## Checkpoint
 
-- `docker compose ps` shows `spark-master`, `spark-worker`, and `spark-connect` running alongside `seaweedfs`.
+- `docker compose ps` shows `spark-master`, `spark-worker`, and `spark-connect` running alongside `seaweedfs`, and the Connect log says `Spark Connect server started`.
 - The Spark UI at `localhost:8080` shows a registered worker.
 - Your Python client connected via `sc://localhost:15002` and `spark.range(5).show()` returned five rows.
 - You can name three advantages of Spark Connect and at least one trade-off.
@@ -299,7 +340,7 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 1. **Watch it in the UI.** With the client connected, run a slightly bigger job (for example `spark.range(10_000_000).filter("id % 2 = 0").count()`) and watch it appear in the Spark UI. Notice how the work is split into tasks.
 2. **Prove laziness.** Define a DataFrame with several transformations but don't call an action. Confirm nothing runs in the UI. Then add `.count()` and watch the job finally execute.
 3. **Two sessions at once.** Open a second Python client with its own `SparkSession.builder.remote(...)`. Confirm both work independently against the same cluster, which is the multi-session isolation from earlier.
-4. **Read a Connect error on purpose.** Try calling `spark.sparkContext` from the client and read the error. Now you'll recognize it instantly if it ever happens for real.
+4. **Read a Connect error on purpose.** Try calling `spark.sparkContext` from the client and read the error. It's ``PySparkAttributeError: [JVM_ATTRIBUTE_NOT_SUPPORTED] Attribute `sparkContext` is not supported in Spark Connect as it depends on the JVM. ...``. Now you'll recognize it instantly if it ever happens for real.
 
 ## Check your understanding
 
