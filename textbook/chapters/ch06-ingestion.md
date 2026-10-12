@@ -93,9 +93,20 @@ Run it from your host:
 
 ```bash
 python3 pipelines/generate_orders.py
+# -> wrote 1000 raw order records
 ```
 
 **What just happened?** You stood in for a source system. The script wrote 1000 raw order records as JSON files into `s3a://lakehouse/raw/orders/`, including some nulls and a few negative amounts. That messiness is deliberate; it is what makes Chapter 7's cleaning meaningful.
+
+See what actually landed. The write didn't produce one file; Spark writes one file per partition of the DataFrame, so list the raw prefix:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/raw/orders/
+# .../raw/orders/part-00000-....json
+# .../raw/orders/_SUCCESS
+```
+
+The `_SUCCESS` marker is Spark's "this write finished cleanly" flag, and the `part-*` files hold the JSON. This is a raw drop, plain JSON, no table semantics yet; that comes when you land it into Iceberg below.
 
 **Step 2: read the raw source and add ingestion metadata.** Reading the raw drop and tagging it with how and when you got it is the "faithful capture" part of Bronze.
 
@@ -140,12 +151,21 @@ spark.sql("""
 **Step 4: verify the landing, and prove idempotency** by running Step 3 again and confirming the count does not change.
 
 ```python
-spark.table("iceberg.bronze.orders_raw").count()
-# run the write again ... then:
-spark.table("iceberg.bronze.orders_raw").count()   # same number, no duplicates
+spark.table("iceberg.bronze.orders_raw").count()   # -> 1000
+# now re-run the Step 3 write (the exact same CREATE-skip + overwritePartitions) ...
+spark.table("iceberg.bronze.orders_raw").count()   # -> 1000, unchanged
 ```
 
-Expected: the second run leaves the row count unchanged. That's idempotency you can see. This is worth doing deliberately once, because "the count didn't change when I ran it twice" is the most satisfying and concrete proof that your ingest is safe to retry. If you'd used a naive append, the count would have doubled; try that too (in a scratch table) so you feel the difference.
+Expected: the second run leaves the row count at exactly `1000`. That's idempotency you can see. This is worth doing deliberately once, because "the count didn't change when I ran it twice" is the most satisfying and concrete proof that your ingest is safe to retry. If you'd used a naive append, the count would have doubled to `2000`; try that too (in a scratch table) so you feel the difference.
+
+Now look at how Iceberg laid the Bronze table out, because the partitioning is physical. List the table's data prefix:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/warehouse/ | grep "orders_raw/data"
+# .../bronze/orders_raw/data/_ingest_date=2026-01-05/00000-....parquet
+```
+
+Notice the `_ingest_date=2026-01-05/` directory in the path: that is `PARTITIONED BY (_ingest_date)` made concrete. Each day's batch lands under its own partition prefix, which is exactly why `overwritePartitions()` can replace one day without touching another, it rewrites only the objects under that one `_ingest_date=` prefix. Partitioning isn't an abstract tuning knob; it's a directory layout you can see, and it's what makes the idempotent per-day overwrite physically possible.
 
 ## Batch now, streaming later
 
