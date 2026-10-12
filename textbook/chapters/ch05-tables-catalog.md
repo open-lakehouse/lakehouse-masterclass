@@ -271,6 +271,47 @@ spark.sql("SELECT made_current_at, snapshot_id, is_current_ancestor "
 
 Expected: `.snapshots` shows one row so far, your insert, recorded as an `append`. (The `CREATE TABLE` itself made no snapshot: snapshots record data operations, and the empty create had none.) `.files` shows the Parquet file(s) your insert produced, with a `record_count` of 3. `.history` shows the order in which snapshots became current. You are literally reading the tree from Figure 5.3.
 
+### Now go look at the actual files in the bucket
+
+The metadata tables are Iceberg describing itself. For the version that makes it click, open the bucket and look at the real objects. The `file_path` column you just saw gives you the exact object-storage location; take its directory part and list the table's prefix recursively with the S3 CLI from Chapter 3:
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/warehouse/ | grep orders
+```
+
+Expected: two kinds of object, under two directories (the exact prefix is assigned by the catalog, so match whatever `file_path` reported):
+
+```
+.../bronze/orders/data/00000-0-....parquet          # the 3 rows you inserted (Parquet)
+.../bronze/orders/metadata/00000-....metadata.json  # table metadata: schema + snapshot list
+.../bronze/orders/metadata/snap-....avro            # a manifest list (one per snapshot)
+.../bronze/orders/metadata/....-m0.avro             # a manifest (lists the data files)
+```
+
+There it is: your three rows are one Parquet object under `data/`; everything under `metadata/` is the tree that turns that object into a table. Pull the current `metadata.json` down and read it:
+
+```bash
+aws --endpoint-url http://localhost:8333 \
+    s3 cp s3://lakehouse/warehouse/.../bronze/orders/metadata/00000-....metadata.json - | python3 -m json.tool
+```
+
+Expected (trimmed): a JSON document with `current-snapshot-id`, a `schemas` array whose fields carry the stable integer `id`s that make schema evolution safe, and a `snapshots` array where each entry's `manifest-list` points at exactly the `snap-....avro` you saw in the listing. You are reading, in raw form, the tree in Figure 5.3: `metadata.json` -> manifest list -> manifest -> data file.
+
+Now watch the tree grow. Insert one more row, then re-list the `metadata/` prefix:
+
+```python
+spark.sql("INSERT INTO iceberg.bronze.orders VALUES "
+          "('o-1009','c-9', 10.0, 'placed', TIMESTAMP '2026-01-05 11:00:00')")
+```
+
+```bash
+aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/warehouse/ | grep "orders/metadata"
+```
+
+Expected: a **new** `metadata.json` (version bumped from `00000` to `00001`), a **new** `snap-....avro` manifest list, and a new manifest, while the old ones are still present, untouched. That single observation is the entire design: a write never edits old files, it writes new metadata and flips the catalog's pointer to it. Both snapshots' manifest lists now sit side by side in the bucket, which is why time travel (next-but-one section) is possible at all, the old snapshot's files were never removed.
+
+> **These exact object names and prefixes are illustrative** (version numbers, UUIDs, and the catalog-assigned path depend on your run). The shape, `data/` Parquet plus a `metadata/` tree of `metadata.json` + `snap-*.avro` + `*.avro`, is what to confirm.
+
 ## Schema evolution: change the shape, keep the data
 
 Requirements change. A month in, you need to know which channel each order came from (web, mobile, in-store). In a naive files-on-disk world, adding a column can mean rewriting every file. Iceberg makes it a metadata-only operation.
@@ -294,7 +335,7 @@ spark.sql("""
 spark.table("iceberg.bronze.orders").show()
 ```
 
-Expected: the three original rows show `NULL` under `channel`; the new row shows `mobile`. Crucially, the original Parquet files were not touched. Iceberg knows they predate the `channel` field and simply returns `NULL` for it.
+Expected: every row that existed before the `ADD COLUMN` reads back `NULL` under `channel`; only the newly inserted `o-1004` row shows `mobile`. Crucially, the original Parquet files were not touched. Iceberg knows they predate the `channel` field and simply returns `NULL` for it.
 
 **Rename a column**, also metadata-only, because of those stable field IDs:
 
