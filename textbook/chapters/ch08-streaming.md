@@ -238,7 +238,7 @@ This is the streaming equivalent of the idempotency you built in Chapter 6, and 
 
 ## Checkpoint (yours, not the stream's)
 
-- Kafka is healthy and your `stream_orders.py` producer is publishing order events.
+- Kafka is healthy and your `lakehouse/stream_source.py` producer is publishing order events.
 - Your Structured Streaming job reads the `orders` topic over `sc://` and appends to `iceberg.bronze.orders_raw`.
 - The job uses a watermark and `dropDuplicatesWithinWatermark` for exactly-once.
 - A `checkpointLocation` is set, and the Bronze row count grows as events arrive.
