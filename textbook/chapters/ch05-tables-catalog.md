@@ -165,9 +165,9 @@ A JSON config response means the catalog is live, speaking the Iceberg REST prot
 **Step 2: connect a thin client and create a namespace and a table.** The catalog name `iceberg` and the REST wiring are configured server-side (see the callout above), so from the client you simply use them:
 
 ```python
-from pyspark.sql import SparkSession
+from lakehouse.session import get_spark
 
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
+spark = get_spark()   # the factory from Chapter 4; one connection, defined once
 
 # A namespace (schema) to hold our Bronze tables.
 spark.sql("CREATE NAMESPACE IF NOT EXISTS iceberg.bronze")

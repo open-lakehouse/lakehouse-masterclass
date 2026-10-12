@@ -136,8 +136,8 @@ Expected: SDP reports the resolved graph and materializes `iceberg.silver.orders
 **Step 5: query the Gold table over a thin client.**
 
 ```python
-from pyspark.sql import SparkSession
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
+from lakehouse.session import get_spark
+spark = get_spark()
 spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
 ```
 

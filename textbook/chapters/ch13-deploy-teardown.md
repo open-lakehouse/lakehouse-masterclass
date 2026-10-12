@@ -84,9 +84,8 @@ Prove it, don't trust it. Bring the stack back up and confirm your Gold table su
 ```bash
 docker compose up -d
 # wait for the catalog and Spark to be healthy, then:
-python3 -c "from pyspark.sql import SparkSession; \
-s = SparkSession.builder.remote('sc://localhost:15002').getOrCreate(); \
-print(s.table('iceberg.gold.daily_revenue').count(), 'Gold rows survived')"
+python3 -c "from lakehouse.session import get_spark; \
+print(get_spark().table('iceberg.gold.daily_revenue').count(), 'Gold rows survived')"
 ```
 
 Expected: the same row count you had before the teardown. The containers were destroyed and recreated, but the data lived in named volumes, not in the containers, so it is exactly where you left it. That separation of compute (ephemeral containers) from storage (durable volumes) is the same decoupling principle from Chapter 1, now visible in your teardown habit.

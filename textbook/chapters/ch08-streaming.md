@@ -141,11 +141,11 @@ python3 pipelines/stream_orders.py
 **Step 3: define the streaming read from Kafka.** This runs on the Connect server, so it reaches Kafka at the in-network address `kafka:9092`.
 
 ```python
-from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
+from lakehouse.session import get_spark
 
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
+spark = get_spark("orders-stream")
 
 schema = StructType([
     StructField("order_id", StringType()), StructField("customer_id", StringType()),

@@ -83,9 +83,9 @@ curl -s http://localhost:5000/health
 ```python
 import mlflow, mlflow.sklearn
 from sklearn.linear_model import LinearRegression
-from pyspark.sql import SparkSession
+from lakehouse.session import get_spark
 
-spark = SparkSession.builder.remote("sc://localhost:15002").getOrCreate()
+spark = get_spark("train-order-count")
 
 # Record WHICH data trained the model (snapshot id -> reproducibility).
 snap = spark.sql("SELECT max(snapshot_id) s FROM iceberg.gold.daily_revenue.snapshots").collect()[0]["s"]
