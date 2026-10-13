@@ -68,8 +68,8 @@ Also added and runtime-verified during this pass:
      resolution on that type, so `.snapshots`, `.files`, `.history` are unusable from
      Spark. With authorization on it fails earlier, while resolving securables.
      Fix: the Iceberg routes' exception handler reports SCHEMA_NOT_FOUND as
-     TABLE_NOT_FOUND on table-scoped routes. It is prepared for upstream with tests (one
-     with authorization on), and a patched image made `.snapshots`, `.files`
+     TABLE_NOT_FOUND on table-scoped routes: unitycatalog/unitycatalog#1983 (issue) and
+     #1984 (PR, with tests including one with authorization on), and a patched image made `.snapshots`, `.files`
      and `.history` work from Spark end to end. Workarounds in the course meanwhile:
      `SHOW TBLPROPERTIES ... ('current-snapshot-id')`, the `_file` column, and
      `lakehouse/catalog.py` (keep that one as a teaching tool). When a UC release
