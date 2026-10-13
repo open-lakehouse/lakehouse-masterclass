@@ -242,7 +242,9 @@ Flow iceberg.silver.orders is RUNNING.
 Flow iceberg.gold.daily_revenue is RUNNING.
 ```
 
-SDP no longer knows that Gold depends on Silver. Here is the mechanism, because it's a genuine gap in Spark 4.1 rather than anything you did wrong. SDP learns a flow's dependencies by finding the reads of other pipeline datasets in the flow's (unresolved) query plan. Over Spark Connect, though, `withColumn` is sent to the server as its own plan node, and the Connect server tries to analyze it eagerly the moment it arrives, which means looking `iceberg.silver.orders` up in the catalog. On the very first run Silver doesn't exist yet, the eager analysis fails, the server keeps the unresolved plan, and SDP finds the dependency. From the second run on Silver does exist, the read gets resolved straight to the catalog table, and SDP sees an ordinary external table instead of its own dataset. It then refreshes Gold alongside Silver, at the moment Silver has just been truncated for its own refresh (every run truncates the materialized views it rebuilds first), so Gold aggregates an empty table.
+SDP no longer knows that Gold depends on Silver. Here is the mechanism, because it's a genuine gap in Spark rather than anything you did wrong (it reproduces on stock Spark 4.1.0, 4.1.3 and 4.2.0, and on the main branch as of this writing). SDP learns a flow's dependencies by finding the reads of other pipeline datasets in the flow's (unresolved) query plan. Over Spark Connect, though, `withColumn` is sent to the server as its own plan node, and the Connect server tries to analyze it eagerly the moment it arrives, which means looking `iceberg.silver.orders` up in the catalog. On the very first run Silver doesn't exist yet, the eager analysis fails, the server keeps the unresolved plan, and SDP finds the dependency. From the second run on Silver does exist, the read gets resolved straight to the catalog table, and SDP sees an ordinary external table instead of its own dataset. It then refreshes Gold alongside Silver, at the moment Silver has just been truncated for its own refresh (every run truncates the materialized views it rebuilds first), so Gold aggregates an empty table.
+
+Be careful when you borrow from Spark's own SDP programming guide: its `daily_orders_by_state` example ends in `.withColumnRenamed("count", "order_count")` on a read of another pipeline dataset, so run over Connect a second time, it hits this same gap. Rewrite that last step as a `select` with an alias.
 
 The practical rule, until Spark fixes this upstream:
 
@@ -367,7 +369,7 @@ The tests need the Connect server up (they use `get_spark()`), so they're really
 - Spark Declarative Pipelines let you declare datasets and dependencies; the engine derives the graph and refresh, built on Spark Connect.
 - Data quality lives in the dataset definition as ordinary filters (drop) or raised errors (fail). The named-expectations API is a Databricks feature, not part of OSS.
 - Cleaning logic lives in a reusable `lakehouse/quality.py` function that Silver calls and `tests/` verifies, so the rules protecting Gold are themselves tested. Money is conformed to an exact `DECIMAL`.
-- "It said COMPLETED" is not verification: re-run and check the counts. In Spark 4.1, a flow that reads another pipeline dataset should shape columns with `select`, not `withColumn`, or SDP can lose the dependency.
+- "It said COMPLETED" is not verification: re-run and check the counts. In Spark 4.1 and 4.2, a flow that reads another pipeline dataset should shape columns with `select`, not `withColumn`, or SDP can lose the dependency.
 - **Next, Chapter 8, Streaming:** feed the same Silver continuously from Kafka with a streaming table, and contrast streaming with the batch pipeline you just built.
 
 ![Progress: Transformation complete, Streaming next](../figures/ch07/fig-7.4-progress-transform-done.svg)

@@ -74,27 +74,30 @@ Also added and runtime-verified during this pass:
      `SHOW TBLPROPERTIES ... ('current-snapshot-id')`, the `_file` column, and
      `lakehouse/catalog.py` (keep that one as a teaching tool). When a UC release
      carries the fix, restore the metadata-table queries in Chapters 5 and 11.
-   - **Spark 4.1 (also 4.1.3, same code on master): SDP over Spark Connect loses a
+   - **Spark 4.1 (also 4.1.3, 4.2.0 and master, all tested): SDP over Spark Connect loses a
      flow's dependency when the flow uses `withColumn` / `withColumnRenamed` on a read
      of another pipeline dataset that already exists.** The Connect planner analyzes
      those nodes eagerly when the pipeline registers the flow, resolving the read to
      the catalog table, so SDP treats it as external: on every run after the first,
      both flows start together and the downstream one reads a just-truncated table
      (Gold empty, run "COMPLETED"). Reproduces without Iceberg (session catalog,
-     Parquet). `drop`, `na.fill` and other eager transforms fail outright. A fix is
+     Parquet), and in default `spark-pipelines run` mode with stock images, so it is
+     not our setup. `drop`, `na.fill` and other eager transforms fail outright. A fix is
      prepared for upstream: pipeline flow plans are converted with eager analysis
      deferred, with a PythonPipelineSuite test that fails without it.
      Course workaround (not a hack, a real rule until the fix ships): Gold shapes its
      columns with `select`, not `withColumn`, so the single `spark-pipelines run` is
      correct on every run (verified across repeated runs and in Airflow). Chapter 7
      teaches the rule and the mechanism. When a Spark release carries the fix, soften
-     the rule in Chapter 7 to a note about older versions.
+     the rule in Chapter 7 to a note about older versions. Spark's own SDP programming
+     guide example (`daily_orders_by_state`, `withColumnRenamed`) hits it; Chapter 7
+     warns about that too.
    - **MLflow image** `ghcr.io/mlflow/mlflow:v3.1.0` ships without `boto3`; the course
      builds a two-line image. Recheck on the next MLflow pin.
 
 4. **No Iceberg Spark runtime for Spark 4.2 yet** (`iceberg-spark-runtime-4.2_2.13`
    is not on Maven Central). Stay on Spark 4.1 until it exists, then re-verify
-   (including whether the SDP issue above is fixed there).
+   (the SDP issue above is NOT fixed in 4.2.0).
 
 5. **Companion code repository.** `COURSE.md` describes per-chapter git tags as
    planned. A verified reference build of the finished project exists from this run
