@@ -123,7 +123,7 @@ This chapter settles the two decisions, the object store (SeaweedFS) and the tab
 
 ## Build: SeaweedFS as your first service
 
-This is the first real service in your stack, so it's the first thing in the `docker-compose.yml` you're about to create at your project root (Chapter 2's `hello-world` smoke test used a throwaway file you removed; this is the real one). You'll define SeaweedFS, bring it up, and prove you can put bytes in and get them back out over the S3 API.
+This is the first real service in your stack, so it's the first thing in the `docker-compose.yml` you're about to create at your project root (Chapter 2's `hello-world` check ran a single container with no Compose file at all; this is where the file is born). You'll define SeaweedFS, bring it up, and prove you can put bytes in and get them back out over the S3 API.
 
 Step 1. Put the credentials in your `.env`. SeaweedFS needs an access key and secret to protect its S3 endpoint, and everything downstream (Spark, the catalog) will read the same values. These are secrets, so they live in the gitignored `.env` from Chapter 2, not in the Compose file:
 
@@ -137,12 +137,12 @@ S3_WAREHOUSE=s3a://lakehouse/warehouse
 
 Use your own values for a real deployment; these are fine for local development.
 
-Step 2. Define the object store as a service. Create `docker-compose.yml` at your project root with a single service:
+Step 2. Define the object store as a service. Create `docker-compose.yml` at your project root with a single service. (Compose names everything it creates, containers, volumes, the network, after the folder the file lives in, so here you'll see names like `open-lakehouse-seaweedfs-1`. That also means two different projects in folders with the same name are treated as one project, and a `docker compose down` in one would stop the other's containers. Keep this project's folder name unique on your machine.)
 
 ```yaml
 services:
   seaweedfs:
-    image: chrislusf/seaweedfs:3.80
+    image: chrislusf/seaweedfs:4.49
     env_file: .env
     entrypoint:
       - sh
@@ -154,13 +154,15 @@ services:
           "credentials":[{"accessKey":"$${S3_ACCESS_KEY}","secretKey":"$${S3_SECRET_KEY}"}],
           "actions":["Admin","Read","Write","List","Tagging"]}]}
         EOF
-        exec weed server -s3 -s3.config=/etc/seaweedfs/s3.json -dir=/data
+        exec weed server -s3 -s3.config=/etc/seaweedfs/s3.json -s3.domainName=seaweedfs -dir=/data
     ports:
       - "8333:8333"   # S3 API, reachable from your host at localhost:8333
     volumes:
       - seaweedfs-data:/data
     networks:
-      - lakehouse-network
+      lakehouse-network:
+        aliases:
+          - lakehouse.seaweedfs   # virtual-host-style name for the bucket (Unity Catalog uses it)
 
 volumes:
   seaweedfs-data:
@@ -170,24 +172,34 @@ networks:
     driver: bridge
 ```
 
-That top-level `networks:` block defines one shared bridge network for the whole stack. Every service you add in later chapters joins `lakehouse-network`, which is how they find each other by service name (`seaweedfs:8333`, `spark-connect:15002`, and so on). You define it once here, with your first service, and reference it everywhere after.
+That top-level `networks:` block defines one shared bridge network for the whole stack. Every later service lists it with the short form (`networks: [lakehouse-network]`); SeaweedFS uses the longer form only because it also needs an alias, explained below. Every service you add in later chapters joins `lakehouse-network`, which is how they find each other by service name (`seaweedfs:8333`, `spark-connect:15002`, and so on). You define it once here, with your first service, and reference it everywhere after.
 
 There's one subtlety worth stopping on, because it's a real security trap. If you just run `weed server -s3` with no config, SeaweedFS serves its S3 endpoint **wide open**, no credentials required. Passing the access key and secret as plain environment variables does *not* secure it; the S3 server only enforces credentials when you give it an identities config with `-s3.config`. That's what the `entrypoint` above does: it writes a small JSON identities file from your `.env` values at startup, then starts the server pointed at it, so the endpoint actually requires the access key and secret to read or write. This matters even locally, because Chapter 2's whole point was to build good habits before the stakes are real.
 
-The rest is Chapter 2 concepts made concrete. The image is pinned to a specific version (`3.80`) rather than `latest`, so your stack is reproducible and doesn't drift when a new release lands. The `env_file: .env` line loads your credentials into the container's environment, and the `$${...}` escaping tells Compose to leave those references alone so the container's own shell expands them at startup, which keeps the secret in your environment rather than baked into the committed Compose file. The `ports` entry publishes the S3 port so you can reach it from your laptop; other containers won't need that, they'll reach it by service name. And the named volume `seaweedfs-data` is where the bytes actually persist; without it, everything you store vanishes when the container stops.
+Two more settings are there for Chapter 5, and it's worth knowing why now. S3 clients address a bucket one of two ways. **Path style** puts the bucket in the path (`http://seaweedfs:8333/lakehouse/key`); **virtual-host style** puts it in the hostname (`http://lakehouse.seaweedfs:8333/key`). Spark and the AWS CLI can be told to use path style, and in this course they are. Unity Catalog's built-in S3 client can't, and always uses virtual-host style. So `-s3.domainName=seaweedfs` tells SeaweedFS to read the bucket name out of a `<bucket>.seaweedfs` hostname, and the network alias makes the name `lakehouse.seaweedfs` resolve to this container. Path-style clients simply never use the alias.
+
+> **Why exactly 4.49?** The version matters more than usual here, because two bugs in older SeaweedFS releases break this stack in ways that are miserable to debug. Releases before 4.12 answer an S3 `HEAD` request for a "folder" key incorrectly, so Spark's S3A file committer decides the folder is a file and every Spark write of plain files (the raw drop in Chapter 6, the streaming checkpoints in Chapter 8) fails with `destination parent is not a directory`. Releases from 4.07 through 4.48 reject requests that carry a session token alongside a static access key, and Unity Catalog always sends one with the credentials it hands out (Chapter 5), so every table write fails with `InvalidAccessKeyId`. 4.49 is the first release with both fixes. If you ever change the version, re-run this chapter's round trip and Chapter 6's first write before trusting it.
+
+The rest is Chapter 2 concepts made concrete. The image is pinned to a specific version (`4.49`) rather than `latest`, so your stack is reproducible and doesn't drift when a new release lands. The `env_file: .env` line loads your credentials into the container's environment, and the `$${...}` escaping tells Compose to leave those references alone so the container's own shell expands them at startup, which keeps the secret in your environment rather than baked into the committed Compose file. The `ports` entry publishes the S3 port so you can reach it from your laptop; other containers won't need that, they'll reach it by service name. And the named volume `seaweedfs-data` is where the bytes actually persist; without it, everything you store vanishes when the container stops.
 
 Step 3. Bring it up:
 
 ```bash
 docker compose up -d
-docker compose ps
+docker compose ps --format "table {{.Name}}\t{{.Service}}\t{{.Status}}\t{{.Ports}}"
 ```
 
-Expected: `docker compose ps` shows one service, up and with the S3 port published:
+Expected: one service, up, with the S3 port published (SeaweedFS also lists its other internal ports, which you can ignore):
 
 ```
-NAME        IMAGE                      STATUS         PORTS
-seaweedfs   chrislusf/seaweedfs:3.80   Up 5 seconds   0.0.0.0:8333->8333/tcp
+NAME                         SERVICE     STATUS         PORTS
+open-lakehouse-seaweedfs-1   seaweedfs   Up 5 seconds   ..., 0.0.0.0:8333->8333/tcp, ...
+```
+
+"Up" means the process started, not that it's ready. SeaweedFS starts a master, a volume server, and a filer before the S3 gateway answers, which takes a few seconds. Wait for it instead of guessing:
+
+```bash
+until curl -s -o /dev/null http://localhost:8333; do sleep 1; done; echo "S3 is answering"
 ```
 
 The `-d` flag runs it in the background (detached), so you get your shell back; this is the normal way to run long-lived services, unlike the foreground `hello-world` run in Chapter 2. If `STATUS` says `Restarting` or `Exited`, the container isn't healthy, go straight to `docker compose logs seaweedfs` and the troubleshooting section rather than pushing on.
@@ -199,8 +211,10 @@ export AWS_ACCESS_KEY_ID=lakehouse
 export AWS_SECRET_ACCESS_KEY=lakehouse-secret
 export AWS_DEFAULT_REGION=us-east-1
 
-# custom S3 endpoints need path-style addressing, not virtual-host style
-aws configure set default.s3.addressing_style path
+# A dedicated profile for this course, so your real AWS settings stay untouched.
+# Custom S3 endpoints need path-style addressing, not virtual-host style.
+aws configure set profile.lakehouse.s3.addressing_style path
+export AWS_PROFILE=lakehouse
 
 # create the bucket your tables will live in
 aws --endpoint-url http://localhost:8333 s3 mb s3://lakehouse
@@ -218,21 +232,29 @@ Expected output, step by step:
 ```
 make_bucket: lakehouse                                    # s3 mb
 upload: ../tmp/hello.txt to s3://lakehouse/test/hello.txt # s3 cp (in)
-2026-01-05 09:00:00         15 hello.txt                  # s3 ls
+2026-01-05 09:00:00         16 hello.txt                  # s3 ls
 download: s3://lakehouse/test/hello.txt to ../tmp/back.txt # s3 cp (out)
 hello lakehouse                                           # cat
 ```
 
-The last line is the whole point: the exact 15 bytes you put in came back out. Now look at how SeaweedFS actually stored it, list the bucket recursively:
+(Your dates differ, and the `../tmp` paths are relative to wherever you ran the command.) The last line is the whole point: the exact 16 bytes you put in came back out, fifteen characters plus the newline `echo` adds. Now look at how SeaweedFS actually stored it, list the bucket recursively:
 
 ```bash
 aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse
-# 2026-01-05 09:00:00         15 test/hello.txt
+# 2026-01-05 09:00:00         16 test/hello.txt
 ```
 
 Notice there is no `test/` directory object, only a single object whose *key* is `test/hello.txt`. Object storage has no real folders; the slashes are just characters in a flat key namespace, and clients render them as folders for convenience. That one detail explains a lot about how Iceberg lays out tables later: a "table directory" is really just a shared key prefix across many objects.
 
-Two settings there aren't optional against a local endpoint. The AWS CLI insists on a region even when it's meaningless here, so `AWS_DEFAULT_REGION` keeps it from erroring. And `path` addressing matters because the CLI defaults to virtual-host style (`bucket.localhost`), which doesn't resolve for a local store; path style (`localhost:8333/bucket`) is what SeaweedFS and MinIO expect.
+Two settings there aren't optional against a local endpoint. The AWS CLI insists on a region even when it's meaningless here, so `AWS_DEFAULT_REGION` keeps it from erroring. And `path` addressing matters because the CLI defaults to virtual-host style (`lakehouse.localhost`), which doesn't resolve on your host; path style (`localhost:8333/lakehouse`) works everywhere. The setting lives in a `lakehouse` profile rather than your default one because `aws configure set default...` rewrites `~/.aws/config`, and a path-style default would quietly change how the CLI talks to real AWS for every other project on your machine. In any new terminal, re-run the four `export` lines before using the CLI against SeaweedFS.
+
+Prove the credentials are actually enforced, since that was the point of the identities file:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8333/lakehouse/   # -> 403 (no credentials)
+AWS_SECRET_ACCESS_KEY=wrong aws --endpoint-url http://localhost:8333 s3 ls s3://lakehouse
+# -> An error occurred (SignatureDoesNotMatch) when calling the ListObjectsV2 operation: ...
+```
 
 **What just happened?** You talked to your local object store using the same AWS CLI you'd use against real Amazon S3; the only difference is `--endpoint-url` pointing at your laptop instead of AWS. That's the S3-API promise made concrete: one tool, one command shape, whether the store is on your machine or in the cloud. You created the bucket your tables will eventually live in, and you proved the fundamental contract, put bytes in, get the same bytes out. There are no tables yet, and that's correct: you built the container they'll live in, not the tables themselves.
 
@@ -249,14 +271,15 @@ Step back and look at what you've actually stood up. It's one service, but it's 
 - **`docker compose ps` doesn't show seaweedfs running.** Check `docker compose logs seaweedfs`. A common cause is that the published port `8333` is already in use by something else; change the host side of the mapping (for example `"8433:8333"`) and reach it there.
 - **`aws s3 ls` gives "Could not connect to the endpoint."** The service isn't up, or you're pointed at the wrong address. From your host shell use `localhost:8333`; `seaweedfs:8333` only resolves from inside the Compose network.
 - **"Access Denied" listing the bucket.** The credentials the AWS CLI is using don't match the ones SeaweedFS started with. Confirm the `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in your shell match `S3_ACCESS_KEY` / `S3_SECRET_KEY` in `.env`. If a `List` or `PutObject` is refused even though the keys match, check the `actions` in the identities config include `List`, `Write`, and `Tagging`.
-- **The bucket hostname won't resolve, or you get an `InvalidAccessKeyId` / signature error you can't explain.** You're almost certainly missing the region and path-style settings from Step 4. Run `aws configure set default.s3.addressing_style path` and export `AWS_DEFAULT_REGION`, then retry; virtual-host addressing (`bucket.localhost`) does not work against a local endpoint.
+- **The bucket hostname won't resolve, or you get an `InvalidAccessKeyId` / signature error you can't explain.** You're almost certainly missing the region and path-style settings from Step 4, often because you opened a new terminal. Re-run the `export` lines (including `AWS_PROFILE=lakehouse`) and confirm `aws configure get profile.lakehouse.s3.addressing_style` prints `path`; virtual-host addressing (`lakehouse.localhost`) does not work from your host.
+- **`Could not connect to the endpoint` right after `up`.** SeaweedFS is still starting; run the `until curl` loop from Step 3 and retry.
 - **Your data vanished after a restart.** You almost certainly omitted the named volume, or ran `docker compose down -v`, which deletes volumes. `down` alone keeps your data; `down -v` wipes it. That `-v` is a real footgun on a stack holding data you care about.
 
 ## Checkpoint
 
-- The `seaweedfs` service is defined in `docker-compose.yml` with a pinned image, a published port, and a named volume, and it shows running under `docker compose ps`.
+- The `seaweedfs` service is defined in `docker-compose.yml` with a pinned image (`4.49`), a published port, a named volume, and the `lakehouse.seaweedfs` network alias, and it shows running under `docker compose ps`.
 - Credentials live in the gitignored `.env` and are referenced from Compose, not hardcoded.
-- The `lakehouse` bucket exists, and you round-tripped a file through the S3 API.
+- The `lakehouse` bucket exists, you round-tripped a file through the S3 API, and an unauthenticated request gets `403`.
 - You can explain why you reach the store at `localhost:8333` but Spark will reach it at `seaweedfs:8333`.
 - You can explain, on the axes that matter, why this course runs SeaweedFS and uses Iceberg, and the difference between the object store and the table format.
 

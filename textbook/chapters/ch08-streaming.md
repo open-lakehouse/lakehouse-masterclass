@@ -63,16 +63,17 @@ Streaming adds one new service, Kafka, the event streaming platform that holds t
 ```yaml
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
-    container_name: zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
     networks:
       - lakehouse-network
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
-    container_name: kafka
     depends_on:
       - zookeeper
     ports:
@@ -85,6 +86,8 @@ Streaming adds one new service, Kafka, the event streaming platform that holds t
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:29092
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data   # topics + messages survive a recreate
     networks:
       - lakehouse-network
 ```
@@ -94,42 +97,97 @@ Bring them up and confirm Kafka is healthy:
 ```bash
 docker compose up -d zookeeper kafka
 docker compose ps
+docker compose logs kafka | grep "started (kafka.server.KafkaServer)"
 ```
+
+The last command should print one line ending in `started (kafka.server.KafkaServer)`; give it a few seconds after `up` if it doesn't yet.
+
+Add the three volumes to the top-level `volumes:` block, next to the others:
+
+```yaml
+volumes:
+  # ...the volumes from earlier chapters...
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+```
+
+Without them, the topic and every message in it live inside the container, so the next `docker compose down` / `up` (Chapter 13) brings Kafka back empty. Your stream's checkpoint would then point at offsets in a topic that no longer exists, and the stream fails on restart with `UnknownTopicOrPartitionException`.
+
+Now create the `orders` topic explicitly, once:
+
+```bash
+docker compose exec kafka kafka-topics --bootstrap-server kafka:9092 \
+    --create --if-not-exists --topic orders --partitions 1 --replication-factor 1
+# Created topic orders.
+```
+
+Kafka will auto-create a topic the first time a producer writes to it, but the streaming job in Step 3 subscribes to `orders` and fails with `UnknownTopicOrPartitionException` if it starts before any producer has written. Creating the topic up front removes that race, and makes the topic's settings (one partition, no replication, fine for a laptop) something you chose rather than a default you inherited.
 
 **What just happened?** You started Kafka, the durable pipe between a source and your streaming job. The dual-listener setup is the Chapter 2 networking lesson again: `kafka:9092` is the address inside the Compose network (what Spark will use), `localhost:29092` is the published address for clients on your host (what the producer below will use). Mixing these up is the single most common Kafka-on-Docker mistake.
 
-**Step 2: produce a live stream of order events.** In production this would be your application emitting events. To keep it self-contained, add a small producer module, `lakehouse/stream_source.py`, that publishes order events to the `orders` topic from your host (the streaming counterpart to the batch `generate.py`). Install the client first:
+Put both addresses in your config, next to the others, so no module hardcodes either one. Add to `lakehouse/config.py`:
+
+```python
+# Kafka has two addresses (Chapter 8): the host-side listener for clients on your
+# laptop, and the in-network listener for code that runs on the Spark cluster.
+KAFKA_BOOTSTRAP        = os.environ.get("KAFKA_BOOTSTRAP", "localhost:29092")
+KAFKA_BOOTSTRAP_SPARK  = os.environ.get("KAFKA_BOOTSTRAP_SPARK", "kafka:9092")
+CHECKPOINT_PREFIX      = os.environ.get("CHECKPOINT_PREFIX", "s3a://lakehouse/_checkpoints")
+```
+
+**Step 2: produce a live stream of order events.** In production this would be your application emitting events. To keep it self-contained, add a producer module, `lakehouse/stream_source.py`, the streaming counterpart to the batch `generate.py`. Like the batch generator, it's deliberately imperfect, because the train-in-the-tunnel scenario from earlier is exactly what the watermark and dedup are for: now and then it re-sends an event it already sent (an at-least-once producer retrying), and now and then it sends an event stamped a few minutes in the past (a phone that was offline). Install the Kafka client first:
 
 ```bash
 pip install kafka-python
 ```
 
 ```python
-import json, random, time
-from datetime import datetime, timezone
+# lakehouse/stream_source.py
+"""Stand-in for an application emitting order events to Kafka, warts and all:
+some events are re-sent (an at-least-once producer retrying) and some arrive
+late (a phone that was offline). `python -m lakehouse.stream_source`"""
+import json
+import random
+import time
+from datetime import datetime, timedelta, timezone
+
 from kafka import KafkaProducer
 
-producer = KafkaProducer(
-    bootstrap_servers="localhost:29092",   # host-side listener
-    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-)
+from lakehouse.config import KAFKA_BOOTSTRAP
 
-statuses = ["placed", "shipped", "cancelled", "placed", "placed"]
+STATUSES = ["placed", "placed", "placed", "shipped", "cancelled"]
 
-def produce(rate_per_sec: float = 5.0):
+
+def produce(rate_per_sec: float = 5.0, limit: int | None = None, topic: str = "orders") -> None:
+    producer = KafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP,          # host-side listener
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+    )
+    recent = []                                      # recently sent events, for re-sends
     i = 0
-    while True:
+    while limit is None or i < limit:
         i += 1
-        event = {
-            "order_id": f"o-{20000 + i}",
-            "customer_id": f"c-{random.randint(1, 200)}",
-            "amount": round(random.uniform(5, 500), 2),
-            "status": random.choice(statuses),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-        producer.send("orders", event)
-        print("sent", event["order_id"])
+        now = datetime.now(timezone.utc)
+        roll = random.random()
+        if roll < 0.05 and recent:
+            event, kind = random.choice(recent), "RESEND"     # duplicate delivery
+        else:
+            created = now - timedelta(minutes=3) if roll < 0.10 else now
+            event = {
+                "order_id": f"o-s{int(time.time() * 1000)}-{i}",
+                "customer_id": f"c-{random.randint(1, 200)}",
+                "amount": round(random.uniform(5, 500), 2),
+                "status": random.choice(STATUSES),
+                "created_at": created.isoformat(timespec="milliseconds"),
+            }
+            kind = "late" if roll < 0.10 else "sent"
+            recent = (recent + [event])[-50:]
+        producer.send(topic, event)
+        print(f"{kind:>6} {event['order_id']}  created_at={event['created_at']}")
         time.sleep(1.0 / rate_per_sec)
+    producer.flush()
+
 
 if __name__ == "__main__":
     produce()
@@ -139,76 +197,129 @@ Run it in its own terminal and leave it running:
 
 ```bash
 python -m lakehouse.stream_source
+#   sent o-s1791805123456-1  created_at=2026-10-12T12:06:10.123+00:00
+#   sent o-s1791805123657-2  created_at=2026-10-12T12:06:10.324+00:00
+#   late o-s1791805123858-3  created_at=2026-10-12T12:03:10.525+00:00
+# RESEND o-s1791805123456-1  created_at=2026-10-12T12:06:10.123+00:00
+# ...
 ```
 
-**What just happened?** The producer publishes an order event roughly every 200 ms into the `orders` topic. Kafka durably holds those events, so if your streaming consumer is down for a while, the events wait for it rather than being lost. The producer connects on `localhost:29092` because it runs on your host, outside the Compose network.
+(kafka-python may print a `DeprecationWarning` about `value_serializer`; it's harmless.)
 
-**Step 3: define the streaming read from Kafka.** This runs on the Connect server, so it reaches Kafka at the in-network address `kafka:9092`.
+**What just happened?** The producer publishes an order event roughly every 200 ms into the `orders` topic (Kafka creates the topic on first use). Each line tells you what kind of event it was: `sent` is a normal event, `late` is one whose `created_at` is three minutes old, and `RESEND` is a duplicate of an event already sent, same `order_id` and all. Kafka durably holds every one of them, duplicates included; Kafka moves bytes, it doesn't judge them. If your streaming consumer is down for a while, the events wait for it rather than being lost. The producer connects on `localhost:29092` because it runs on your host, outside the Compose network.
+
+**Step 3: write the streaming ingest.** The consumer is a module too, `lakehouse/stream_ingest.py`, so it can be started, stopped, and restarted like any other part of the project. Read it top to bottom; the next two steps walk through what each part does.
 
 ```python
+# lakehouse/stream_ingest.py
+"""Kafka -> Structured Streaming -> the SAME Bronze table the batch ingest writes.
+`python -m lakehouse.stream_ingest` (long-running; Ctrl-C to stop)."""
 from pyspark.sql import functions as F
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
+from pyspark.sql.types import DoubleType, StringType, StructField, StructType, TimestampType
+
+from lakehouse.config import CATALOG, CHECKPOINT_PREFIX, KAFKA_BOOTSTRAP_SPARK
+from lakehouse.ingest import BRONZE
 from lakehouse.session import get_spark
 
-spark = get_spark("orders-stream")
-
-schema = StructType([
+EVENT_SCHEMA = StructType([
     StructField("order_id", StringType()), StructField("customer_id", StringType()),
     StructField("amount", DoubleType()),   StructField("status", StringType()),
     StructField("created_at", TimestampType()),
 ])
 
-raw = (spark.readStream
-       .format("kafka")
-       .option("kafka.bootstrap.servers", "kafka:9092")   # in-network address
-       .option("subscribe", "orders")
-       .option("startingOffsets", "latest")
-       .load())
+CHECKPOINT = f"{CHECKPOINT_PREFIX}/bronze_orders_stream"
 
-# Kafka values are bytes; parse the JSON payload into columns.
-events = (raw.select(F.from_json(F.col("value").cast("string"), schema).alias("e"))
-             .select("e.*"))
+
+def start(starting_offsets: str = "latest"):
+    spark = get_spark("orders-stream")
+    # The dedup state is split into shuffle partitions, and each one writes its own
+    # files to the checkpoint on every micro-batch. The default (200) is sized for
+    # big batch jobs; for a trickle of events it just litters the bucket.
+    spark.conf.set("spark.sql.shuffle.partitions", "4")
+
+    raw = (spark.readStream
+           .format("kafka")
+           .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SPARK)   # in-network address
+           .option("subscribe", "orders")
+           .option("startingOffsets", starting_offsets)
+           .load())
+
+    # Kafka values are bytes; parse the JSON payload into typed columns.
+    events = (raw.select(F.from_json(F.col("value").cast("string"), EVENT_SCHEMA).alias("e"))
+                 .select("e.*"))
+
+    deduped = (events
+        .withWatermark("created_at", "10 minutes")          # tolerate 10 min lateness
+        .dropDuplicatesWithinWatermark(["order_id"]))        # one row per order_id
+
+    # Match Bronze's schema exactly: created_at stays a string (faithful capture),
+    # plus the same ingestion-metadata columns the batch job adds.
+    bronze = (deduped
+        .withColumn("created_at",   F.date_format("created_at", "yyyy-MM-dd'T'HH:mm:ss.SSS"))
+        .withColumn("_ingested_at", F.current_timestamp())
+        .withColumn("_source",      F.lit("orders-stream"))
+        .withColumn("_ingest_date", F.to_date("_ingested_at")))
+
+    return (bronze.writeStream
+        .format("iceberg")
+        .outputMode("append")
+        .trigger(processingTime="10 seconds")               # one Iceberg commit per 10s
+        .option("checkpointLocation", CHECKPOINT)
+        .toTable(BRONZE))
+
+
+if __name__ == "__main__":
+    query = start()
+    print("streaming into", BRONZE, "- checkpoint", CHECKPOINT)
+    query.awaitTermination()
 ```
 
-**What just happened?** Two things worth noticing. First, `readStream` instead of `read`: that one word is the difference between a batch and a streaming source; everything after it is the familiar DataFrame API. Second, Kafka hands you raw bytes in a `value` column, so you parse the JSON payload into real typed columns with `from_json` and your declared `schema`. Kafka doesn't know or care what's inside your messages, it just moves bytes, so giving the data structure is your job on the read side. (The Kafka source itself is provided by the `spark-sql-kafka` package, configured once server-side on the Connect server alongside the Iceberg packages from Chapter 4.)
+**Reading from Kafka.** `readStream` instead of `read` is the one word that turns a batch source into a streaming one; everything after it is the familiar DataFrame API. The read runs on the Connect server, so it uses the in-network address `kafka:9092` (from `KAFKA_BOOTSTRAP_SPARK`). Kafka hands you raw bytes in a `value` column, so you parse the JSON payload into real typed columns with `from_json` and the declared `EVENT_SCHEMA`; giving the data structure is your job on the read side. (The Kafka source itself is the `spark-sql-kafka` package, configured server-side on the Connect server alongside the Iceberg packages in Chapter 4.)
 
-**Step 4: watermark, deduplicate, and write the stream into the Bronze Iceberg table.**
+**Watermark, dedup, write.** This is the train-in-the-tunnel scenario handled in a few lines. `withWatermark("created_at", "10 minutes")` sets the kitchen's closing time: accept events up to 10 minutes late. The producer's late events are three minutes old, well inside it, so they land. `dropDuplicatesWithinWatermark(["order_id"])` lands each `order_id` once even when the producer sends it twice. Then the rows are shaped to match the Bronze table the batch job created in Chapter 6: `created_at` goes back to a string (faithful capture), and the same `_ingested_at` / `_source` / `_ingest_date` metadata columns are added. The `_source` is `orders-stream`, which puts these rows in their own partitions, so a batch re-ingest of today (Chapter 6's partition-by-source decision) can never overwrite them. `trigger(processingTime="10 seconds")` gathers events into one micro-batch, and so one Iceberg commit, every 10 seconds; without a trigger, Spark starts a new micro-batch as soon as the last finishes, which on a table means a stream of tiny commits and tiny files. Finally, `toTable(BRONZE)` writes to the same `iceberg.bronze.orders_raw` the batch job writes: streaming is a different how, same destination.
+
+The `spark.conf.set("spark.sql.shuffle.partitions", "4")` line at the top of `start()` comes from watching this job run. Deduplication is stateful: Spark remembers recently seen `order_id`s, and that state is split into shuffle partitions, each of which writes its own small files into the checkpoint on every micro-batch. With Spark's default of 200 partitions (sized for big batch jobs), a few minutes of a slow trickle left thousands of tiny objects under the checkpoint's `state/` folder. Four is plenty for a few events a second. Note that the setting is fixed into a query's checkpoint the first time it starts; changing it later requires a fresh checkpoint.
+
+**Step 4: start the stream.** In a second terminal (leave the producer running in the first):
+
+```bash
+python -m lakehouse.stream_ingest
+# streaming into iceberg.bronze.orders_raw - checkpoint s3a://lakehouse/_checkpoints/bronze_orders_stream
+```
+
+It then sits there: `awaitTermination()` reflects that this job never finishes; it runs until you stop it with Ctrl-C.
+
+**Step 5: from another client, watch the Bronze count climb as events flow.** Open a third terminal with a Python session (leave the producer and the stream running) and run the counts a few times, ten seconds or so apart:
 
 ```python
-deduped = (events
-    .withWatermark("created_at", "10 minutes")          # tolerate 10 min lateness
-    .dropDuplicatesWithinWatermark(["order_id"]))        # exactly-once per order
-
-# Match the Bronze schema from Chapter 6: created_at stays a string (faithful
-# capture), plus the same ingestion-metadata columns, so the stream can write
-# the SAME table the batch job created.
-bronze = (deduped
-    .withColumn("created_at",   F.col("created_at").cast("string"))
-    .withColumn("_ingested_at", F.current_timestamp())
-    .withColumn("_source",      F.lit("orders-stream"))
-    .withColumn("_ingest_date", F.to_date(F.current_timestamp())))
-
-query = (bronze.writeStream
-    .format("iceberg")
-    .outputMode("append")
-    .option("checkpointLocation", "s3a://lakehouse/_checkpoints/bronze_orders_stream")
-    .toTable("iceberg.bronze.orders_raw"))               # SAME Bronze table as batch
-
-query.awaitTermination()   # long-running: this job doesn't "finish"
+from lakehouse.session import get_spark
+spark = get_spark()
+bronze = spark.table("iceberg.bronze.orders_raw")
+bronze.count(), bronze.where("_source = 'orders-stream'").count()
+# (1095, 75)    <- the batch rows from Chapter 6, plus the first streamed events
+# (1141, 121)   <- ten seconds later
+# (1189, 169)   <- and climbing, roughly 5 a second
 ```
 
-**What just happened?** This is the train-in-the-tunnel scenario handled in a few lines. `withWatermark("created_at", "10 minutes")` sets the kitchen's closing time, accept events up to 10 minutes late. `dropDuplicatesWithinWatermark(["order_id"])` lands each `order_id` exactly once even if the producer sent it three times. Then you shape the rows to match the Bronze table the batch job created in Chapter 6, the same `_ingested_at` / `_source` / `_ingest_date` metadata columns, with `created_at` kept as a string, so the schema lines up. And `toTable("iceberg.bronze.orders_raw")` writes to the same Bronze table; streaming is a different how, same destination. Finally, `awaitTermination()` reflects that this job never finishes; it runs until you stop it. (`F` here is `pyspark.sql.functions`, imported in Step 3.)
+Your exact numbers depend on how many days you batch-ingested in Chapter 6 and when you started the stream; what matters is that the first number starts at your batch total and climbs in steps every ten seconds (one micro-batch, one commit).
 
-**Step 5: from another client, watch the Bronze count climb as events flow.** Open a second Python session (leave the streaming job and the producer running) and run the count a few times, a few seconds apart:
+**What just happened?** Two things, and the second is the real lesson. First, the number climbs, proof the stream is live: events flow from the producer, through Kafka, through your Structured Streaming job, into Iceberg, in near-real-time. Second, look at where it *started*: your batch rows from Chapter 6. The stream is appending into the **same** `iceberg.bronze.orders_raw` table the batch job wrote. That is the convergence argument from the chapter intro made physical: one Bronze table, fed by both a scheduled batch job and a continuous stream, and a downstream reader can't tell which rows arrived which way (unless it looks at `_source`). One stack, not two.
+
+**Step 6: prove the dedup worked.** The producer has been re-sending events the whole time, so if dedup were broken you'd see the same `order_id` more than once:
 
 ```python
-spark.table("iceberg.bronze.orders_raw").count()
-#   1000   <- the batch rows you loaded in Chapter 6
-#   1037   <- a few seconds later: streamed events have landed
-#   1092   <- and climbing, ~5/sec from the producer
+spark.sql("""
+    SELECT count(*) AS rows, count(DISTINCT order_id) AS ids
+    FROM iceberg.bronze.orders_raw WHERE _source = 'orders-stream'
+""").show()
+# +----+---+
+# |rows|ids|
+# +----+---+
+# | 263|263|
+# +----+---+
 ```
 
-**What just happened?** Two things, and the second is the real lesson. First, the number climbs, proof the stream is live: events flow from the producer, through Kafka, through your Structured Streaming job, into Iceberg, in near-real-time. Second, look at where it *started*: `1000`, the exact batch rows from Chapter 6. The stream is appending into the **same** `iceberg.bronze.orders_raw` table the batch job wrote. That is the convergence argument from the chapter intro made physical: one Bronze table, fed by both a scheduled batch job and a continuous stream, and a downstream reader can't tell which rows arrived which way. One stack, not two.
+`rows` equals `ids`: every order landed exactly once even though Kafka holds duplicates. You can compare against what's actually in the topic: `docker compose exec kafka kafka-run-class kafka.tools.GetOffsetShell --broker-list kafka:9092 --topic orders` prints `orders:0:<n>`, the number of messages Kafka holds, which is larger than `rows` by the re-sends (plus whatever arrived after the last micro-batch).
 
 ## Why the checkpoint matters
 
@@ -217,38 +328,54 @@ The `checkpointLocation` is what makes a streaming job restartable and idempoten
 Don't take that on faith either, look at what the checkpoint wrote. List its location in the bucket while the stream runs:
 
 ```bash
-aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/_checkpoints/bronze_orders_stream/
-# .../offsets/0        <- the Kafka offsets read up to each micro-batch
-# .../commits/0        <- which micro-batches committed successfully
-# .../metadata         <- the stream's identity
-# .../state/0/...      <- the watermark + dedup state (dropDuplicatesWithinWatermark)
+aws --endpoint-url http://localhost:8333 s3 ls s3://lakehouse/_checkpoints/bronze_orders_stream/
+#                            PRE commits/     <- which micro-batches committed successfully
+#                            PRE offsets/     <- the Kafka offsets read up to each micro-batch
+#                            PRE sources/     <- the source's own bookkeeping (where Kafka reading began)
+#                            PRE state/       <- the watermark + dedup state (dropDuplicatesWithinWatermark)
+# 2026-10-12 12:06:21     45 metadata         <- the stream's identity
+aws --endpoint-url http://localhost:8333 s3 ls s3://lakehouse/_checkpoints/bronze_orders_stream/offsets/
+# one small file per micro-batch: 0, 1, 2, ...
 ```
 
-Those four things *are* the stream's memory. `offsets/` is the bookmark into Kafka ("I've read up to here"); `commits/` records which batches finished; `state/` holds the in-flight watermark and the set of recently-seen `order_id`s used for dedup. On restart, Spark reads `offsets/` and `commits/` to find exactly where it left off and `state/` to restore the dedup window, which is precisely why a restart neither skips nor double-writes. Delete this directory and all of that memory is gone, so the next start reads the topic from scratch.
+Those are the stream's memory. `offsets/` is the bookmark into Kafka ("I've read up to here"); `commits/` records which batches finished; `state/` holds the in-flight watermark and the set of recently-seen `order_id`s used for dedup. On restart, Spark reads `offsets/` and `commits/` to find exactly where it left off and `state/` to restore the dedup window, which is precisely why a restart neither skips nor double-writes. Delete this directory and all of that memory is gone, so the next start reads the topic from scratch.
 
 This is the streaming equivalent of the idempotency you built in Chapter 6, and it matters for the same reason: things fail, and recovery must be safe. A batch job retries by re-running a bounded chunk. A streaming job can't "re-run", it never stopped, so instead it remembers its exact position (the Kafka offsets) and its in-flight state (the watermark) in the checkpoint. On restart, it reads that bookmark and continues precisely where it left off. Without the checkpoint, a restart would either re-process events (duplicates) or skip them (data loss). The checkpoint is what turns a fragile long-running process into a reliable one. Never point two different queries at the same checkpoint location, and never delete it unless you truly mean "start this stream over from scratch."
 
+Prove it rather than trust it. Stop the stream with Ctrl-C (leave the producer running), note the streamed count, wait half a minute so events pile up in Kafka, then start it again with the same command:
+
+```bash
+python -m lakehouse.stream_ingest
+```
+
+Re-run the Step 6 query after a micro-batch or two. The count jumps past where it stopped (it caught up on everything produced while it was down), and `rows` still equals `ids`: nothing was skipped and nothing was written twice. That's the checkpoint, plus the dedup state stored inside it, doing its job.
+
+When you're done, stop both terminals with Ctrl-C.
+
 ## Troubleshooting
 
-- **The streaming query starts but no rows land.** With `startingOffsets: latest`, the job only sees events produced after it started. Confirm the producer is actively running, or use `earliest` to read from the start of the topic.
-- **"Cannot connect to Kafka" or broker errors from the streaming job.** The job runs on the Connect server, so it must use the in-network address `kafka:9092`, not `localhost`. From a host producer, use `localhost:29092`. Getting these backwards is the usual cause.
+- **The streaming query starts but no rows land.** With `startingOffsets` set to `latest` (the default in `start()`), a brand-new query only sees events produced after it started. Confirm the producer is actively running, or call `start("earliest")` with a new checkpoint to read from the start of the topic. Rows also arrive in steps, one commit per 10-second trigger, so wait a trigger or two.
+- **"Cannot connect to Kafka" or broker errors from the streaming job.** The job runs on the Connect server, so it must use the in-network address `kafka:9092` (`KAFKA_BOOTSTRAP_SPARK`), not `localhost`. A host producer uses `localhost:29092` (`KAFKA_BOOTSTRAP`). Getting these backwards is the usual cause.
+- **`Could not rename` or `destination parent is not a directory` errors under `_checkpoints/`.** Checkpoint files are committed by rename, which depends on the object store handling S3A's directory markers correctly. Use the SeaweedFS version pinned in Chapter 3.
+- **The checkpoint folder fills with thousands of tiny files.** The stateful dedup is using the default 200 shuffle partitions. Keep the `spark.sql.shuffle.partitions` line in `start()`; it only takes effect for a new checkpoint.
 - **Row count doesn't grow.** Either the producer stopped, the schema doesn't match the JSON (so `from_json` yields nulls), or the watermark/dedup is dropping everything. Inspect a few parsed rows before the write.
 - **"Checkpoint location already exists" or corrupt-state errors on restart.** You changed the query in an incompatible way, or two queries share a checkpoint. Use a fresh checkpoint path for a genuinely new query.
 - **Streaming Connect errors.** As in Chapter 4, read the last line of the Connect-style traceback first.
 
 ## Checkpoint (yours, not the stream's)
 
-- Kafka is healthy and your `lakehouse/stream_source.py` producer is publishing order events.
+- Kafka is healthy and your `lakehouse/stream_source.py` producer is publishing order events, including re-sends and late ones.
 - Your Structured Streaming job reads the `orders` topic over `sc://` and appends to `iceberg.bronze.orders_raw`.
 - The job uses a watermark and `dropDuplicatesWithinWatermark` for exactly-once.
-- A `checkpointLocation` is set, and the Bronze row count grows as events arrive.
+- A `checkpointLocation` is set, the Bronze row count grows as events arrive, and streamed rows equal distinct `order_id`s.
+- You stopped and restarted the stream and it resumed without duplicates or gaps.
 - You can state one case where streaming beats batch and one where it doesn't.
 
 ## Try it yourself
 
 1. **Kill and restart.** Stop the streaming query, note the Bronze count, restart the same job (same checkpoint), and confirm it resumes without duplicating or skipping. That's the checkpoint earning its keep.
-2. **Read from the beginning.** Start a fresh query with `startingOffsets: earliest` and a new checkpoint path, and watch it backfill the whole topic. Compare with `latest`.
-3. **Tune the watermark.** Change the watermark from 10 minutes to 1 minute and reason about what would happen to a genuinely late event. What are you trading?
+2. **Read from the beginning.** Start a fresh query that reads the topic from the start, with its own checkpoint, by setting `CHECKPOINT_PREFIX=s3a://lakehouse/_checkpoints/replay` and calling `start("earliest")`. Does the dedup still hold when the whole topic is replayed? (Think about which rows are already in Bronze from the first query, and whether this second query knows about them.)
+3. **Tune the watermark.** The producer's late events are three minutes old. Change the watermark from 10 minutes to 1 minute (in a fresh checkpoint) and reason about what happens to them. What are you trading?
 4. **Make the batch-vs-streaming call.** For three imaginary requirements ("nightly finance report," "live fraud alerts," "hourly inventory sync"), decide batch or streaming and justify each in one sentence.
 
 ## Check your understanding

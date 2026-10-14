@@ -25,7 +25,7 @@ This is for you if you can write a bit of **Python** and **SQL**, are comfortabl
 
 You do **not** need to already know Spark, Docker internals, Kafka, or distributed systems. Every concept gets defined the moment you need it, right before you build the thing that uses it. Tools serve the idea here, never the other way around.
 
-**What you'll need:** a laptop with about 16 GB of RAM (8 GB works if you bring services up one at a time), Docker, and a willingness to run real infrastructure locally. Everything runs on your machine and tears down with a single command when you're done, so you get your machine back with no leftover mess.
+**What you'll need:** a laptop with about 16 GB of RAM, Docker, and a willingness to run real infrastructure locally. With every service up, the stack used about 4.5 GB of container memory after a pipeline run when we verified the course, with brief peaks above that while a job runs. 8 GB can work if you cap the Spark worker (Chapter 4 shows how) and keep Airflow and MLflow stopped until their chapters. Everything runs on your machine and tears down with a single command when you're done, so you get your machine back with no leftover mess.
 
 ---
 
@@ -33,7 +33,7 @@ You do **not** need to already know Spark, Docker internals, Kafka, or distribut
 
 The whole thing is written as a **textbook**: read it front to back, one chapter at a time. You build the lakehouse **from scratch**, no magic setup script and no repo to clone. Each chapter adds **one service** to a Docker Compose file you write yourself, so the system grows under your hands and you understand every piece of it. We follow a single story throughout: a stream of realistic **order events** that you ingest, clean, aggregate, schedule, serve, learn from, and eventually hand off to an agent.
 
-There's a companion **code repository** too. [`COURSE.md`](COURSE.md) maps each chapter to a git tag, so you can check out the exact working state for any layer and pick up wherever you like.
+[`COURSE.md`](COURSE.md) is the quick reference: for each chapter, the commands you run and the checkpoint that proves the layer works. A companion code repository with a git tag per chapter is planned; until it exists, the chapters themselves contain every file in full.
 
 Start here → **[textbook/README.md](textbook/README.md)**, then read **[textbook/chapters/](textbook/chapters/)** in order.
 
@@ -70,7 +70,7 @@ And here's the quiet secret: **these are the same open tools the big paid platfo
 ```
 lakehouse-masterclass/
 ├── README.md          ← you are here 👋
-├── COURSE.md          ← chapter → code tag → commands → checkpoint map
+├── COURSE.md          ← chapter → commands → checkpoint quick reference
 └── textbook/          ← the course itself
     ├── README.md          the table of contents
     ├── chapters/          ch01 … ch13, one Markdown file per chapter

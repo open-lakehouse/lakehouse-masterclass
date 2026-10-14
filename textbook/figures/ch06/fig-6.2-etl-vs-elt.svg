@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">
   <rect width="1280" height="720" fill="#0f172a"/>
-  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">ETL vs. ELT — the lakehouse loads raw first</text>
+  <text x="640" y="58" fill="#f8fafc" font-size="34" font-weight="700" text-anchor="middle">ETL vs. ELT: the lakehouse loads raw first</text>
 
   <!-- ETL (top) -->
-  <text x="80" y="150" fill="#f87171" font-size="24" font-weight="700">ETL — the old way</text>
+  <text x="80" y="150" fill="#f87171" font-size="24" font-weight="700">ETL: the old way</text>
   <g>
     <rect x="80" y="175" width="180" height="70" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
     <text x="170" y="217" fill="#e2e8f0" font-size="18" text-anchor="middle" font-weight="700">Source</text>
@@ -28,7 +28,7 @@
   <line x1="80" y1="300" x2="1200" y2="300" stroke="#334155" stroke-width="1.5" stroke-dasharray="4 4"/>
 
   <!-- ELT (bottom) -->
-  <text x="80" y="370" fill="#4ade80" font-size="24" font-weight="700">ELT — the lakehouse way</text>
+  <text x="80" y="370" fill="#4ade80" font-size="24" font-weight="700">ELT: the lakehouse way</text>
   <g>
     <rect x="80" y="395" width="180" height="70" rx="12" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
     <text x="170" y="437" fill="#e2e8f0" font-size="18" text-anchor="middle" font-weight="700">Source</text>
@@ -51,7 +51,7 @@
     <path d="M820 430 L886 430"/>
   </g>
 
-  <text x="640" y="560" fill="#94a3b8" font-size="17" text-anchor="middle">Cheap storage + co-located compute make "load raw, transform later" faster to build — and re-processable.</text>
+  <text x="640" y="560" fill="#94a3b8" font-size="17" text-anchor="middle">Cheap storage + co-located compute make "load raw, transform later" faster to build, and re-processable.</text>
 
   <defs>
     <marker id="a6" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
