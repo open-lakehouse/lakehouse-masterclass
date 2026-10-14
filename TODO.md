@@ -16,11 +16,18 @@ Spark 4.1.0 (Connect), Iceberg 1.12.0, hadoop-aws 3.4.2, Unity Catalog v0.7.0,
 Kafka (Confluent 7.5.0), Airflow 3.3.2, MLflow 3.1.0, DuckDB 1.5.6, PySpark client
 4.1.0, Python 3.12.
 
-Two images in the chapters are not yet published, so verification used stand-ins:
-- Unity Catalog `unitycatalog/unitycatalog:v0.7.0` was built locally from the
-  `v0.7.0` source tag (`docker build -t unitycatalog/unitycatalog:v0.7.0 .`).
+One image in the chapters is not yet published, so verification used a stand-in:
 - SeaweedFS `chrislusf/seaweedfs:4.49` does not exist yet; verification used the
-  `chrislusf/seaweedfs:dev` image built 2026-10-12 (see open item 2).
+  `chrislusf/seaweedfs:dev` image built 2026-10-12 (see open item 1).
+
+Unity Catalog: the first pass used an image built from the `v0.7.0` source tag. The
+official `unitycatalog/unitycatalog:v0.7.0` image (published 2026-10-14, amd64 and
+arm64, same commit `2b17f3b5`) was then swapped in and the course replayed from an
+empty stack on 2026-10-14: catalog creation, Chapter 5's create, insert, schema
+evolution, delete, time travel and rollback, ingest, the medallion on repeated runs
+(Gold for 2026-01-05 matches the book exactly), streaming dedup, an Airflow run,
+DuckDB matching Spark row for row, MLflow train and register, and data surviving
+`docker compose down` + `up`. All passed with no chapter changes.
 
 Verified end to end: S3 auth and round trip; Spark Connect jobs; catalog creation,
 Iceberg create/insert/schema evolution/time travel/rollback through UC; idempotent
@@ -39,11 +46,7 @@ Also added and runtime-verified during this pass:
 
 ## Open items
 
-1. **Swap in the official Unity Catalog v0.7.0 image** when it is published. Confirm
-   the real tag/namespace (the project has skipped tags before; v0.4.1 was never
-   published). No chapter text should ever instruct building from source.
-
-2. **SeaweedFS 4.49 must ship before the course works as written.** Two SeaweedFS
+1. **SeaweedFS 4.49 must ship before the course works as written.** Two SeaweedFS
    behaviors matter, and no released version has both right:
    - S3A directory markers: through 4.05, `HEAD dir` (no slash) on a marker answers
      200 `application/x-directory`, so Hadoop S3A treats the parent as a file and every
@@ -60,13 +63,14 @@ Also added and runtime-verified during this pass:
      (`AWS_REQUEST_CHECKSUM_CALCULATION` / `AWS_RESPONSE_CHECKSUM_VALIDATION`) are
      not needed; they were only required against 3.80.
 
-3. **Upstream bugs** (root-caused; fixes drafted locally, not yet filed or pushed):
+2. **Upstream bugs** (root-caused; the Unity Catalog fix is filed upstream, the Spark one is drafted):
    - **Unity Catalog 0.7: metadata tables fail.** `loadTable` for an identifier like
      `bronze.orders.snapshots` returns 404 `NoSuchNamespaceException` ("Schema not
      found: iceberg.bronze.orders"). The Iceberg REST spec answers table routes with
      `NoSuchTableException`, and Iceberg's client only falls back to metadata-table
      resolution on that type, so `.snapshots`, `.files`, `.history` are unusable from
      Spark. With authorization on it fails earlier, while resolving securables.
+     Still present in the official v0.7.0 image (re-checked 2026-10-14).
      Fix: the Iceberg routes' exception handler reports SCHEMA_NOT_FOUND as
      TABLE_NOT_FOUND on table-scoped routes: unitycatalog/unitycatalog#1983 (issue) and
      #1984 (PR, with tests including one with authorization on), and a patched image made `.snapshots`, `.files`
@@ -95,10 +99,10 @@ Also added and runtime-verified during this pass:
    - **MLflow image** `ghcr.io/mlflow/mlflow:v3.1.0` ships without `boto3`; the course
      builds a two-line image. Recheck on the next MLflow pin.
 
-4. **No Iceberg Spark runtime for Spark 4.2 yet** (`iceberg-spark-runtime-4.2_2.13`
+3. **No Iceberg Spark runtime for Spark 4.2 yet** (`iceberg-spark-runtime-4.2_2.13`
    is not on Maven Central). Stay on Spark 4.1 until it exists, then re-verify
    (the SDP issue above is NOT fixed in 4.2.0).
 
-5. **Companion code repository.** `COURSE.md` describes per-chapter git tags as
+4. **Companion code repository.** `COURSE.md` describes per-chapter git tags as
    planned. A verified reference build of the finished project exists from this run
    and could seed that repository.
