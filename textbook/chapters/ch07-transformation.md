@@ -246,7 +246,7 @@ SDP no longer knows that Gold depends on Silver. Here is the mechanism, because 
 
 Be careful when you borrow from Spark's own SDP programming guide: its `daily_orders_by_state` example ends in `.withColumnRenamed("count", "order_count")` on a read of another pipeline dataset, so run over Connect a second time, it hits this same gap. Rewrite that last step as a `select` with an alias.
 
-The practical rule, until Spark fixes this upstream:
+The bug is tracked upstream as [SPARK-59663](https://issues.apache.org/jira/browse/SPARK-59663), with a fix under review in [apache/spark#59100](https://github.com/apache/spark/pull/59100). The practical rule, until a Spark release carries that fix:
 
 - **When a flow reads another dataset of the same pipeline, shape its columns with `select` (or `selectExpr`), `filter`, `groupBy`/`agg`, or SQL, not `withColumn`, `withColumnRenamed`, or `drop`.** Those last three go through the eager-analysis path. `drop`, which has no fallback at all, fails even the first run with `TABLE_OR_VIEW_NOT_FOUND`.
 - **Reads of tables outside the pipeline are unaffected.** That's why `clean_orders` can use `withColumn` freely: Silver reads Bronze, which this pipeline doesn't define, so there's no dependency to lose.

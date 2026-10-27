@@ -16,9 +16,12 @@ Spark 4.1.0 (Connect), Iceberg 1.12.0, hadoop-aws 3.4.2, Unity Catalog v0.7.0,
 Kafka (Confluent 7.5.0), Airflow 3.3.2, MLflow 3.1.0, DuckDB 1.5.6, PySpark client
 4.1.0, Python 3.12.
 
-One image in the chapters is not yet published, so verification used a stand-in:
-- SeaweedFS `chrislusf/seaweedfs:4.49` does not exist yet; verification used the
-  `chrislusf/seaweedfs:dev` image built 2026-10-12 (see open item 1).
+SeaweedFS: the first pass used the `chrislusf/seaweedfs:dev` image, because no
+release had both fixes the course needs. SeaweedFS 4.49
+shipped the session-token fix (seaweedfs#11694) but was never published as a Docker
+image, so the chapters pin `chrislusf/seaweedfs:4.51` (4.50 is the first image with
+both fixes). The course was replayed on 4.51 from an empty stack on 2026-10-26 and
+every check passed with no other changes.
 
 Unity Catalog: the first pass used an image built from the `v0.7.0` source tag. The
 official `unitycatalog/unitycatalog:v0.7.0` image (published 2026-10-14, amd64 and
@@ -46,63 +49,19 @@ Also added and runtime-verified during this pass:
 
 ## Open items
 
-1. **SeaweedFS 4.49 must ship before the course works as written.** Two SeaweedFS
-   behaviors matter, and no released version has both right:
-   - S3A directory markers: through 4.05, `HEAD dir` (no slash) on a marker answers
-     200 `application/x-directory`, so Hadoop S3A treats the parent as a file and every
-     Spark file write (`FileOutputCommitter` rename, streaming checkpoints) fails with
-     "destination parent is not a directory". Fixed by 4.12.
-   - Static session tokens: Unity Catalog 0.7 only vends static keys together with a
-     session token. 3.80 to 4.05 ignore the token; from 4.07 on it is rejected
-     (`InvalidAccessKeyId`), so UC's own metadata writes fail.
-   - Fix: seaweedfs/seaweedfs#11694 ("s3api: tolerate session tokens on statically
-     configured credentials", merged 2026-10-10). Verified working on the `dev` image.
-     When 4.49 (or whichever release first contains #11694) is out, confirm the tag
-     and update `image:` in Chapter 3 if it differs.
-   - With a release containing both fixes, the AWS SDK checksum env vars
-     (`AWS_REQUEST_CHECKSUM_CALCULATION` / `AWS_RESPONSE_CHECKSUM_VALIDATION`) are
-     not needed; they were only required against 3.80.
+Everything that can be fixed now is fixed. The rest waits on upstream releases or is
+planned work, and each has an issue:
 
-2. **Upstream bugs** (root-caused; the Unity Catalog fix is filed upstream, the Spark one is drafted):
-   - **Unity Catalog 0.7: metadata tables fail.** `loadTable` for an identifier like
-     `bronze.orders.snapshots` returns 404 `NoSuchNamespaceException` ("Schema not
-     found: iceberg.bronze.orders"). The Iceberg REST spec answers table routes with
-     `NoSuchTableException`, and Iceberg's client only falls back to metadata-table
-     resolution on that type, so `.snapshots`, `.files`, `.history` are unusable from
-     Spark. With authorization on it fails earlier, while resolving securables.
-     Still present in the official v0.7.0 image (re-checked 2026-10-14).
-     Fix: the Iceberg routes' exception handler reports SCHEMA_NOT_FOUND as
-     TABLE_NOT_FOUND on table-scoped routes: unitycatalog/unitycatalog#1983 (issue) and
-     #1984 (PR, with tests including one with authorization on), and a patched image made `.snapshots`, `.files`
-     and `.history` work from Spark end to end. Workarounds in the course meanwhile:
-     `SHOW TBLPROPERTIES ... ('current-snapshot-id')`, the `_file` column, and
-     `lakehouse/catalog.py` (keep that one as a teaching tool). When a UC release
-     carries the fix, restore the metadata-table queries in Chapters 5 and 11.
-   - **Spark 4.1 (also 4.1.3, 4.2.0 and master, all tested): SDP over Spark Connect loses a
-     flow's dependency when the flow uses `withColumn` / `withColumnRenamed` on a read
-     of another pipeline dataset that already exists.** The Connect planner analyzes
-     those nodes eagerly when the pipeline registers the flow, resolving the read to
-     the catalog table, so SDP treats it as external: on every run after the first,
-     both flows start together and the downstream one reads a just-truncated table
-     (Gold empty, run "COMPLETED"). Reproduces without Iceberg (session catalog,
-     Parquet), and in default `spark-pipelines run` mode with stock images, so it is
-     not our setup. `drop`, `na.fill` and other eager transforms fail outright. A fix is
-     prepared for upstream: pipeline flow plans are converted with eager analysis
-     deferred, with a PythonPipelineSuite test that fails without it.
-     Course workaround (not a hack, a real rule until the fix ships): Gold shapes its
-     columns with `select`, not `withColumn`, so the single `spark-pipelines run` is
-     correct on every run (verified across repeated runs and in Airflow). Chapter 7
-     teaches the rule and the mechanism. When a Spark release carries the fix, soften
-     the rule in Chapter 7 to a note about older versions. Spark's own SDP programming
-     guide example (`daily_orders_by_state`, `withColumnRenamed`) hits it; Chapter 7
-     warns about that too.
-   - **MLflow image** `ghcr.io/mlflow/mlflow:v3.1.0` ships without `boto3`; the course
-     builds a two-line image. Recheck on the next MLflow pin.
-
-3. **No Iceberg Spark runtime for Spark 4.2 yet** (`iceberg-spark-runtime-4.2_2.13`
-   is not on Maven Central). Stay on Spark 4.1 until it exists, then re-verify
-   (the SDP issue above is NOT fixed in 4.2.0).
-
-4. **Companion code repository.** `COURSE.md` describes per-chapter git tags as
-   planned. A verified reference build of the finished project exists from this run
-   and could seed that repository.
+- **#6** Restore the Iceberg metadata-table queries (`.snapshots`, `.files`,
+  `.history`) once a Unity Catalog release includes unitycatalog/unitycatalog#1984.
+  The fix was merged 2026-10-23; 0.7.0 is still the latest release. Chapters 5 and 11
+  explain the limitation and use `lakehouse/catalog.py`, `SHOW TBLPROPERTIES` and the
+  `_file` column meanwhile.
+- **#7** Relax Chapter 7's "`select`, not `withColumn`" rule once a Spark release fixes
+  SPARK-59663 (fix under review in apache/spark#59100). Reproduced on stock Spark
+  4.1.0, 4.1.3, 4.2.0 and main.
+- **#8** Move to Spark 4.2 once `iceberg-spark-runtime-4.2_2.13` is on Maven Central
+  (also recheck whether a newer MLflow image ships `boto3`; `v3.1.0` doesn't, so
+  Chapter 11 builds a two-line image).
+- **#9** The companion code repository with a git tag per chapter, described as
+  planned in `COURSE.md`.

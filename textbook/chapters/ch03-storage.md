@@ -142,7 +142,7 @@ Step 2. Define the object store as a service. Create `docker-compose.yml` at you
 ```yaml
 services:
   seaweedfs:
-    image: chrislusf/seaweedfs:4.49
+    image: chrislusf/seaweedfs:4.51
     env_file: .env
     entrypoint:
       - sh
@@ -178,9 +178,9 @@ There's one subtlety worth stopping on, because it's a real security trap. If yo
 
 Two more settings are there for Chapter 5, and it's worth knowing why now. S3 clients address a bucket one of two ways. **Path style** puts the bucket in the path (`http://seaweedfs:8333/lakehouse/key`); **virtual-host style** puts it in the hostname (`http://lakehouse.seaweedfs:8333/key`). Spark and the AWS CLI can be told to use path style, and in this course they are. Unity Catalog's built-in S3 client can't, and always uses virtual-host style. So `-s3.domainName=seaweedfs` tells SeaweedFS to read the bucket name out of a `<bucket>.seaweedfs` hostname, and the network alias makes the name `lakehouse.seaweedfs` resolve to this container. Path-style clients simply never use the alias.
 
-> **Why exactly 4.49?** The version matters more than usual here, because two bugs in older SeaweedFS releases break this stack in ways that are miserable to debug. Releases before 4.12 answer an S3 `HEAD` request for a "folder" key incorrectly, so Spark's S3A file committer decides the folder is a file and every Spark write of plain files (the raw drop in Chapter 6, the streaming checkpoints in Chapter 8) fails with `destination parent is not a directory`. Releases from 4.07 through 4.48 reject requests that carry a session token alongside a static access key, and Unity Catalog always sends one with the credentials it hands out (Chapter 5), so every table write fails with `InvalidAccessKeyId`. 4.49 is the first release with both fixes. If you ever change the version, re-run this chapter's round trip and Chapter 6's first write before trusting it.
+> **Why 4.51?** The version matters more than usual here, because two bugs in older SeaweedFS releases break this stack in ways that are miserable to debug. Releases before 4.12 answer an S3 `HEAD` request for a "folder" key incorrectly, so Spark's S3A file committer decides the folder is a file and every Spark write of plain files (the raw drop in Chapter 6, the streaming checkpoints in Chapter 8) fails with `destination parent is not a directory`. Releases from 4.07 through 4.48 reject requests that carry a session token alongside a static access key, and Unity Catalog always sends one with the credentials it hands out (Chapter 5), so every table write fails with `InvalidAccessKeyId`. The fix for the second shipped in the 4.49 release, which was never published as a Docker image, so 4.50 is the first image with both fixes; this course pins 4.51, the current release when the course was last verified. If you ever change the version, re-run this chapter's round trip and Chapter 6's first write before trusting it.
 
-The rest is Chapter 2 concepts made concrete. The image is pinned to a specific version (`4.49`) rather than `latest`, so your stack is reproducible and doesn't drift when a new release lands. The `env_file: .env` line loads your credentials into the container's environment, and the `$${...}` escaping tells Compose to leave those references alone so the container's own shell expands them at startup, which keeps the secret in your environment rather than baked into the committed Compose file. The `ports` entry publishes the S3 port so you can reach it from your laptop; other containers won't need that, they'll reach it by service name. And the named volume `seaweedfs-data` is where the bytes actually persist; without it, everything you store vanishes when the container stops.
+The rest is Chapter 2 concepts made concrete. The image is pinned to a specific version (`4.51`) rather than `latest`, so your stack is reproducible and doesn't drift when a new release lands. The `env_file: .env` line loads your credentials into the container's environment, and the `$${...}` escaping tells Compose to leave those references alone so the container's own shell expands them at startup, which keeps the secret in your environment rather than baked into the committed Compose file. The `ports` entry publishes the S3 port so you can reach it from your laptop; other containers won't need that, they'll reach it by service name. And the named volume `seaweedfs-data` is where the bytes actually persist; without it, everything you store vanishes when the container stops.
 
 Step 3. Bring it up:
 
@@ -277,7 +277,7 @@ Step back and look at what you've actually stood up. It's one service, but it's 
 
 ## Checkpoint
 
-- The `seaweedfs` service is defined in `docker-compose.yml` with a pinned image (`4.49`), a published port, a named volume, and the `lakehouse.seaweedfs` network alias, and it shows running under `docker compose ps`.
+- The `seaweedfs` service is defined in `docker-compose.yml` with a pinned image (`4.51`), a published port, a named volume, and the `lakehouse.seaweedfs` network alias, and it shows running under `docker compose ps`.
 - Credentials live in the gitignored `.env` and are referenced from Compose, not hardcoded.
 - The `lakehouse` bucket exists, you round-tripped a file through the S3 API, and an unauthenticated request gets `403`.
 - You can explain why you reach the store at `localhost:8333` but Spark will reach it at `seaweedfs:8333`.

@@ -338,7 +338,7 @@ spark.sql("SELECT * FROM iceberg.bronze.orders.snapshots").show()
 #   (org.apache.iceberg.exceptions.NoSuchNamespaceException) Schema not found: iceberg.bronze.orders
 ```
 
-To resolve `iceberg.bronze.orders.snapshots`, Spark first asks the catalog for a table named `snapshots` in a namespace named `bronze.orders`. The Iceberg REST spec says a catalog should answer "no such *table*," and Iceberg then retries it as "the `snapshots` metadata of table `bronze.orders`." Unity Catalog 0.7 answers "no such *namespace*" instead, so Spark never gets to the retry. Metadata tables work against catalogs that answer the way the spec says, and you'll see DuckDB's own `iceberg_snapshots()` read this tree in Chapter 10.
+To resolve `iceberg.bronze.orders.snapshots`, Spark first asks the catalog for a table named `snapshots` in a namespace named `bronze.orders`. The Iceberg REST spec says a catalog should answer "no such *table*," and Iceberg then retries it as "the `snapshots` metadata of table `bronze.orders`." Unity Catalog 0.7 answers "no such *namespace*" instead, so Spark never gets to the retry. Metadata tables work against catalogs that answer the way the spec says, and you'll see DuckDB's own `iceberg_snapshots()` read this tree in Chapter 10. The fix is merged in Unity Catalog ([unitycatalog#1984](https://github.com/unitycatalog/unitycatalog/pull/1984)) and arrives in the first release after 0.7.0; once your image includes it, the query above works as written.
 
 That's a small loss, because the information isn't hidden; it's one HTTP call away. The catalog serves a table's entire current `metadata.json` from its `loadTable` endpoint, the same response every engine reads before it plans a query. So read it yourself. First give your config the catalog's REST address, as seen from your host (add this to `lakehouse/config.py`):
 
@@ -657,7 +657,7 @@ Real learning includes the errors. Here are the ones you're most likely to hit i
 
 - **`Invalid S3 Credentials: s3.session-token-expires-at-ms not set`** (from executors, during an `INSERT`). The `client.refresh-credentials-enabled = false` line is missing from `spark-defaults.conf`, or you didn't restart `spark-connect` after adding it.
 
-- **`Schema not found: iceberg.bronze.orders`** when you query `...orders.snapshots`, `.files`, or `.history`. That's the Unity Catalog 0.7 metadata-table limitation explained above, not a mistake on your part. Use `lakehouse.catalog.print_snapshots`, `SHOW TBLPROPERTIES`, and the `_file` column instead.
+- **`Schema not found: iceberg.bronze.orders`** when you query `...orders.snapshots`, `.files`, or `.history`. That's the Unity Catalog 0.7.0 metadata-table limitation explained above (fixed in the next release), not a mistake on your part. Use `lakehouse.catalog.print_snapshots`, `SHOW TBLPROPERTIES`, and the `_file` column instead.
 
 - **`Time travel option snapshot-id is no longer supported, use Spark built-in versionAsOf instead`.** Use `.option("versionAsOf", id)` or `VERSION AS OF id`.
 
