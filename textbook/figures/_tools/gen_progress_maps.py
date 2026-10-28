@@ -71,12 +71,12 @@ def build(current_index, done_through_index, title):
 
 TARGETS = [
     # (chapter_dir, filename, current_index, done_through_index, title)
-    ("ch02", "fig-2.1-progress-setup.svg", 1, 1, "Progress, building: Setup"),
-    ("ch02", "fig-2.7-progress-setup-done.svg", 2, 2, "Progress, Setup complete, Storage next"),
-    ("ch03", "fig-3.1-progress-storage.svg", 2, 2, "Progress, building: Storage"),
-    ("ch03", "fig-3.7-progress-storage-done.svg", 3, 3, "Progress, Storage complete, Compute next"),
-    ("ch04", "fig-4.1-progress-compute.svg", 3, 3, "Progress, building: Compute"),
-    ("ch04", "fig-4.5-progress-compute-done.svg", 4, 4, "Progress, Compute complete, Tables next"),
+    ("ch02", "fig-2.1-progress-setup.svg", 1, 1, "Progress: building Setup"),
+    ("ch02", "fig-2.7-progress-setup-done.svg", 2, 2, "Progress: Setup complete, Storage next"),
+    ("ch03", "fig-3.1-progress-storage.svg", 2, 2, "Progress: building Storage"),
+    ("ch03", "fig-3.7-progress-storage-done.svg", 3, 3, "Progress: Storage complete, Compute next"),
+    ("ch04", "fig-4.1-progress-compute.svg", 3, 3, "Progress: building Compute"),
+    ("ch04", "fig-4.5-progress-compute-done.svg", 4, 4, "Progress: Compute complete, Tables next"),
     ("ch05", "fig-5.1-progress-tables.svg", 4, 4, "Progress: building Tables and Catalog"),
     ("ch05", "fig-5.4-progress-tables-done.svg", 5, 5, "Progress: Tables complete, Ingestion next"),
     ("ch06", "fig-6.1-progress-ingestion.svg", 5, 5, "Progress: building Ingestion"),

@@ -55,72 +55,134 @@ spark = get_spark()
 spark.table("iceberg.gold.daily_revenue").orderBy("order_date", "status").show()
 ```
 
-Expected (your numbers depend on the generated data; note them down for the comparison):
+Expected: the Gold table from Chapter 7. With only the `2026-01-05` batch loaded it is these three rows (the generator is seeded, so yours match); if you ran Chapter 9's backfill you'll also see one row per status for every other day you loaded:
 
 ```
-+----------+---------+--------+-----------+
-|order_date|   status| revenue|order_count|
-+----------+---------+--------+-----------+
-|2026-01-05|cancelled| 4821.17|         63|
-|2026-01-05|   placed|41235.90|        548|
-|2026-01-05|  shipped| 9977.42|        131|
-+----------+---------+--------+-----------+
++----------+---------+---------+-----------+
+|order_date|   status|  revenue|order_count|
++----------+---------+---------+-----------+
+|2026-01-05|cancelled| 48309.50|        200|
+|2026-01-05|   placed|134321.32|        552|
+|2026-01-05|  shipped| 49997.14|        193|
++----------+---------+---------+-----------+
 ```
 
 **What just happened?** Nothing new yet: this is Spark reading its own table through the catalog, establishing the "before" baseline. Note the exact rows it returns; you're about to get the identical rows from a completely different engine.
 
-**Step 2: read the same table from DuckDB,** pointing at the one Iceberg REST catalog. DuckDB is not required infrastructure; it's a lightweight second engine that proves interoperability. It runs on your host, so it uses the host-side catalog address `localhost:8081`. Install it first (`pip install duckdb`, then `python3 -c "import duckdb; duckdb.sql('...')"`, or use the standalone `duckdb` CLI):
+**Step 2: read the same table from DuckDB,** pointing at the one Iceberg REST catalog. DuckDB is not required infrastructure; it's a lightweight in-process engine that proves interoperability. It runs on your host, so it uses the host-side addresses: the catalog at `localhost:8081` and SeaweedFS at `localhost:8333`. Install it into your project's environment:
+
+```bash
+pip install duckdb==1.5.6
+```
+
+DuckDB needs two things from you, and each one teaches something about how a REST catalog works:
+
+1. **Where the catalog is, and how to authenticate to it.** That's the `ATTACH`. Our local Unity Catalog has authentication turned off, so you say so with `AUTHORIZATION_TYPE 'none'`. (DuckDB defaults to OAuth2, the common case for a real deployment, and refuses to attach without credentials.)
+2. **How to reach the files.** The catalog only hands DuckDB metadata: table locations like `s3://lakehouse/warehouse/...`. DuckDB then reads the Parquet and Avro files itself, straight from object storage. Unity Catalog can *vend* temporary storage credentials along with the metadata, but it vends only keys, no endpoint, so a client that relied on them would go looking for the bucket on real AWS. So you give DuckDB an S3 secret pointing at SeaweedFS, and tell the attach not to request vended credentials (`ACCESS_DELEGATION_MODE 'none'`).
+
+In the DuckDB CLI, or in Python with `duckdb.sql(...)`:
 
 ```sql
--- In the DuckDB CLI or Python:
 INSTALL iceberg; LOAD iceberg;
 
--- Attach the SAME Unity Catalog OSS Iceberg REST endpoint Spark uses.
+-- How to reach the files: SeaweedFS, from your host.
+CREATE SECRET seaweedfs (
+    TYPE s3,
+    KEY_ID 'lakehouse', SECRET 'lakehouse-secret',   -- your S3_ACCESS_KEY / S3_SECRET_KEY
+    ENDPOINT 'localhost:8333', URL_STYLE 'path', USE_SSL false, REGION 'us-east-1'
+);
+
+-- Where the catalog is: the SAME Unity Catalog Iceberg REST endpoint Spark uses.
 -- 'iceberg' is the Unity Catalog catalog name (the warehouse you created in Chapter 5).
 ATTACH 'iceberg' AS uc (
     TYPE iceberg,
-    ENDPOINT 'http://localhost:8081/api/2.1/unity-catalog/iceberg'
+    ENDPOINT 'http://localhost:8081/api/2.1/unity-catalog/iceberg',
+    AUTHORIZATION_TYPE 'none',
+    ACCESS_DELEGATION_MODE 'none'
 );
+
+SHOW ALL TABLES;
 
 SELECT order_date, status, revenue, order_count
 FROM uc.gold.daily_revenue
 ORDER BY order_date, status;
 ```
 
-Expected, the same rows Spark gave you, from a different engine:
+`SHOW ALL TABLES` lists every table the catalog knows: `uc.bronze.orders`, `uc.bronze.orders_raw`, `uc.silver.orders`, `uc.gold.daily_revenue`. You didn't register any of them with DuckDB; it discovered them by asking the catalog. The query returns the same rows Spark gave you, from a different engine:
 
 ```
-┌────────────┬───────────┬──────────┬─────────────┐
-│ order_date │  status   │ revenue  │ order_count │
-├────────────┼───────────┼──────────┼─────────────┤
-│ 2026-01-05 │ cancelled │  4821.17 │          63 │
-│ 2026-01-05 │ placed    │ 41235.90 │         548 │
-│ 2026-01-05 │ shipped   │  9977.42 │         131 │
-└────────────┴───────────┴──────────┴─────────────┘
+┌────────────┬───────────┬───────────────┬─────────────┐
+│ order_date │  status   │    revenue    │ order_count │
+│    date    │  varchar  │ decimal(20,2) │    int64    │
+├────────────┼───────────┼───────────────┼─────────────┤
+│ 2026-01-05 │ cancelled │      48309.50 │         200 │
+│ 2026-01-05 │ placed    │     134321.32 │         552 │
+│ 2026-01-05 │ shipped   │      49997.14 │         193 │
+└────────────┴───────────┴───────────────┴─────────────┘
 ```
 
-Put this next to Step 1's output: same dates, same statuses, same revenue, same counts. Spark rendered its table with `+---+` borders and DuckDB with box-drawing characters, but the data is identical because both engines read the very same Parquet files through the very same catalog. That is the whole demonstration: not a copy that matches, the same bytes, read twice.
+Put this next to Step 1's output: same dates, same statuses, same revenue, same counts, even the same `decimal(20,2)` type that Silver's cleaning chose in Chapter 7. Spark rendered its table with `+---+` borders and DuckDB with box-drawing characters, but the data is identical because both engines read the very same Parquet files through the very same catalog. That is the whole demonstration: not a copy that matches, the same bytes, read twice.
 
-DuckDB returns the same rows Spark returned in Step 1, read directly from the Iceberg files, through the shared catalog, with no export step. That identical result across two independent engines is the whole demonstration. (DuckDB's exact `ATTACH ... TYPE iceberg` syntax and any auth options track the DuckDB iceberg extension version; if the keywords differ, check the extension's current docs. The constant is the endpoint URL.)
+**Step 3: prove it, rather than eyeball it.** Two printouts that look alike are not proof. Have the machine compare them, every row of the table, in one Python script that asks both engines:
 
-**What just happened?** Pause on this, because it's the intellectual climax of the course. DuckDB, a completely separate engine that knows nothing about Spark, just read the tables Spark wrote, and got identical results. There was no export, no copy, no "DuckDB format" conversion. DuckDB simply pointed at the same catalog URL, found the same Iceberg tables, and read the same underlying Parquet files. This is what "open" means in practice: your data isn't trapped in one engine's world. Every choice earlier in the course, Iceberg over a proprietary format, Unity Catalog OSS as a standard REST catalog, was made so this moment would work.
+```python
+import duckdb
+from lakehouse.session import get_spark
+
+query = "SELECT order_date, status, revenue, order_count FROM {t} ORDER BY order_date, status"
+
+spark_rows = [tuple(r) for r in get_spark().sql(query.format(t="iceberg.gold.daily_revenue")).collect()]
+
+con = duckdb.connect()
+con.sql("INSTALL iceberg; LOAD iceberg;")
+con.sql("""CREATE SECRET seaweedfs (TYPE s3, KEY_ID 'lakehouse', SECRET 'lakehouse-secret',
+           ENDPOINT 'localhost:8333', URL_STYLE 'path', USE_SSL false, REGION 'us-east-1')""")
+con.sql("""ATTACH 'iceberg' AS uc (TYPE iceberg,
+           ENDPOINT 'http://localhost:8081/api/2.1/unity-catalog/iceberg',
+           AUTHORIZATION_TYPE 'none', ACCESS_DELEGATION_MODE 'none')""")
+duck_rows = con.sql(query.format(t="uc.gold.daily_revenue")).fetchall()
+
+print(len(spark_rows), "rows from Spark,", len(duck_rows), "rows from DuckDB")
+print("identical:", spark_rows == duck_rows)
+```
+
+Expected: the same row count from each engine, and `identical: True`. Both sides come back as plain Python values (dates, strings, `Decimal`s, ints), so the comparison is exact, not "close enough".
+
+**Step 4: look at the table's history from DuckDB.** The second engine doesn't just see the current rows; it sees the same snapshot history Spark wrote, because that history is in the shared metadata:
+
+```sql
+SELECT snapshot_id, timestamp_ms, operation
+FROM iceberg_snapshots(uc.gold.daily_revenue)
+ORDER BY timestamp_ms DESC
+LIMIT 4;
+```
+
+Expected: the most recent snapshots of Gold, alternating `append` and `delete`. That pattern is the materialized-view refresh from Chapter 7 made visible: each refresh resets the table (a `delete` snapshot), then inserts the new result (an `append`). Compare the newest `snapshot_id` with the `current-snapshot-id` Spark reports (`SHOW TBLPROPERTIES iceberg.gold.daily_revenue`) and they match: two engines, one history.
+
+**What just happened?** Pause on this, because it's the intellectual climax of the course. DuckDB, a completely separate engine that knows nothing about Spark, just read the tables Spark wrote, and got identical results, down to the decimal type and the snapshot ids. There was no export, no copy, no "DuckDB format" conversion. DuckDB asked the catalog where the table lives, then read the same underlying files. This is what "open" means in practice: your data isn't trapped in one engine's world. Every choice earlier in the course, Iceberg over a proprietary format, Unity Catalog OSS as a standard REST catalog, was made so this moment would work.
+
+Notice also what you *did* have to tell DuckDB: the storage endpoint and keys. The catalog is shared, but every engine still needs a network path to the bytes. In the cloud, that's usually handled by credential vending plus the provider's standard S3 endpoint, which is why a real deployment needs less configuration here than a local SeaweedFS does.
 
 > Note: DuckDB and DataFusion are optional garnish, nice for proving the point and for lightweight local analytics. Unity Catalog OSS is the one catalog everything goes through; the second engine is interchangeable.
 
-**Step 3 (optional): point a BI tool or notebook at the same catalog.** Any Iceberg-REST-aware client uses the identical endpoint and sees the identical tables.
+**Step 5 (optional): point a BI tool or notebook at the same catalog.** Any Iceberg-REST-aware client uses the identical endpoint and sees the identical tables, subject to the same two questions: how it authenticates to the catalog, and how it reaches object storage.
 
 ## Troubleshooting
 
-- **DuckDB can't attach, or "unknown catalog type iceberg."** Your DuckDB is too old or the iceberg extension didn't load. Run `INSTALL iceberg; LOAD iceberg;` and use a recent DuckDB.
-- **DuckDB attaches but finds no tables.** The endpoint is wrong or the catalog is down. Confirm Unity Catalog OSS is healthy and the URL exactly matches what Spark uses (`.../api/2.1/unity-catalog/iceberg`), and that the attached warehouse name is your actual UC catalog.
-- **Results differ between engines.** Almost always a stale snapshot or a caching issue; re-run the read. Because both engines read the same files through the same catalog, genuinely different results should be impossible; a mismatch means one engine is looking at old state.
+- **`AUTHORIZATION_TYPE is 'oauth2', yet no 'secret' was provided`.** You left `AUTHORIZATION_TYPE 'none'` out of the `ATTACH`. DuckDB defaults to OAuth2; the local Unity Catalog has authentication disabled.
+- **`HTTP 403` / `InvalidAccessKeyId` reading a URL like `https://lakehouse.s3.us-west-2.amazonaws.com/...`.** DuckDB went to real AWS. The catalog worked (it found the table), but DuckDB didn't use your SeaweedFS secret: either the `CREATE SECRET` is missing or wrong, or you left out `ACCESS_DELEGATION_MODE 'none'`, so DuckDB used the catalog's vended keys against Amazon. Create the secret with `ENDPOINT 'localhost:8333'` and `URL_STYLE 'path'`, and attach with delegation off.
+- **"Could not connect" to `seaweedfs:8333`.** You used the in-network address from your host. DuckDB runs on your laptop, so the endpoint is `localhost:8333` (Chapter 2's two-address rule).
+- **"unknown catalog type iceberg" or `ATTACH` options rejected.** Your DuckDB is too old or the iceberg extension didn't load. Run `INSTALL iceberg; LOAD iceberg;` and use the version pinned above; option names track the extension version, so check its docs if you're on a newer release.
+- **DuckDB attaches but finds no tables.** The endpoint is wrong or the catalog is down. Confirm Unity Catalog OSS is healthy and the URL exactly matches what Spark uses (`.../api/2.1/unity-catalog/iceberg`), and that the attached warehouse name is your actual UC catalog (`iceberg`).
+- **Gold is empty in both engines.** That isn't a serving problem; Gold itself is empty. Check Chapter 7's refresh (Silver first, then Gold) and re-run it.
+- **Results differ between engines.** Almost always one engine looked before a refresh finished and the other after. Re-run both reads. Because both engines read the same files through the same catalog, a persistent mismatch should be impossible; it means one side is looking at old state.
 - **"Connection refused" to :8081.** The catalog service isn't running. Start it and re-check `docker compose ps`.
 
 ## Checkpoint
 
 - Your Gold table is visible through the Unity Catalog OSS Iceberg REST catalog.
 - You queried `gold.daily_revenue` from a second engine (DuckDB) using the same endpoint Spark uses.
-- The second engine returned identical results with no data copied or exported.
+- The second engine returned identical results with no data copied or exported, and the programmatic comparison printed `identical: True`.
 - You can explain why this beats a warehouse's export-and-copy model.
 - You can describe the "drift" problem and how one catalog cures it.
 

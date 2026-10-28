@@ -74,7 +74,7 @@ The point of running everything in containers is that your host stays clean, so 
 - **Docker, with the Compose plugin.** This is the one that matters. It runs every service in the stack, so if you install nothing else, install this. Follow Docker's official install guide for your OS, it's kept current and is the authoritative source: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/), [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) (enable the WSL2 backend when prompted), or [Docker Engine](https://docs.docker.com/engine/install/) on Linux (install the `docker-compose-plugin` package alongside it). A couple of notes the guides don't stress: use `docker compose` (two words, the built-in plugin), not the deprecated standalone `docker-compose`; and on Linux, add your user to the `docker` group so you don't need `sudo` for every command.
 - **Python 3.10 or newer.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day.
 - **Git.** To version your project: the Compose file, config, and pipeline code you build. Assume you have it; if not, install it.
-- **The AWS CLI.** Your object store speaks the S3 API, and the AWS CLI is the standard way to poke at S3 from the command line, create buckets, copy files, list objects, whether the store is Amazon S3 or your local one. Install it with `pip install awscli` or your OS package manager. You'll first use it in the next chapter to talk to your object store.
+- **The AWS CLI.** Your object store speaks the S3 API, and the AWS CLI is the standard way to poke at S3 from the command line, create buckets, copy files, list objects, whether the store is Amazon S3 or your local one. Install version 2 with [AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) or your OS package manager. You'll first use it in the next chapter to talk to your object store, through a dedicated `lakehouse` profile so the course never touches any real AWS configuration you already have.
 
 Notice what's *not* here. You don't install Spark, or a JVM, or a database on your host. Spark is a JVM application, but its Java lives inside the Spark container you'll define in the Compute chapter, so there's nothing to set up for it now. The catalog's database is a container too. Keeping these off your host is the whole point of the container approach: the only things touching your machine are the client tools (Docker, Python, Git, and the AWS CLI), never the services themselves.
 
@@ -126,7 +126,7 @@ Make `lakehouse` an installable package so `import lakehouse` works from anywher
 name = "lakehouse"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["pyspark==4.1.0"]   # the Spark Connect client; chapters add extras as needed
+dependencies = ["pyspark[connect]==4.1.0"]   # the Spark Connect client (+ pandas, pyarrow, grpc)
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -136,11 +136,23 @@ build-backend = "setuptools.build_meta"
 packages = ["lakehouse"]
 ```
 
-Then install it in editable mode, so the package is importable and your edits are picked up live without reinstalling:
+Before installing anything, give the project its own Python environment. A **virtual environment** is a private copy of the Python package directory that belongs to this one project, so the course's packages never collide with your system's or another project's. It's also not optional on current Linux distributions: Ubuntu 24.04 and Debian 12 mark the system Python as "externally managed" (PEP 668), and a plain `pip install` there fails with `error: externally-managed-environment`. Create the environment once and activate it in every new terminal you open for this project:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate      # your prompt now starts with (.venv)
+```
+
+(On Debian and Ubuntu, if `python3 -m venv` complains that `ensurepip` is unavailable, install the `python3-venv` package with `apt` and run it again.)
+
+Then install the package in editable mode, so it's importable and your edits are picked up live without reinstalling:
 
 ```bash
 pip install -e .
+python -c "import lakehouse, pyspark; print('ok', pyspark.__version__)"   # -> ok 4.1.0
 ```
+
+Why `pyspark[connect]` and not just `pyspark`? The bare package installs the Spark libraries but not the Spark Connect client's dependencies (pandas, PyArrow, and gRPC). Without them the first `SparkSession.builder.remote(...)` call in Chapter 4 fails with `PySparkImportError: [PACKAGE_NOT_INSTALLED] Pandas >= 2.2.0 must be installed`. The `[connect]` extra pulls them in.
 
 That editable install is the small move that makes everything downstream cohere: once `lakehouse` is on your path, every chapter's code (and your DAGs, and your tests) imports the same functions instead of re-pasting them. We'll create the actual `docker-compose.yml` in the next chapter, when there's a first service to put in it.
 
@@ -161,13 +173,18 @@ Create the `.env` file and, in the same breath, make sure git will ignore it:
 
 ```bash
 touch .env
-echo ".env" >> .gitignore
-echo "data/" >> .gitignore
+cat > .gitignore <<'EOF'
+.env
+data/
+.venv/
+__pycache__/
+*.egg-info/
+EOF
 git add .gitignore
 git commit -m "Ignore secrets and local data"
 ```
 
-That is deliberately the first thing you commit: the rule that keeps secrets out. The `.env` file is empty for now; you'll add values to it as you bring up services that need credentials, starting with the object store's access keys in the next chapter. Compose automatically reads a `.env` file sitting next to your `docker-compose.yml`, so any variable you define there is available to your service definitions without extra wiring.
+That is deliberately the first thing you commit: the rule that keeps secrets out. The last three lines keep generated clutter out too: the virtual environment (hundreds of megabytes of installed packages), Python's bytecode caches, and the metadata `pip install -e .` writes. Without them, your first `git add -A` would try to commit the whole `.venv/`. The `.env` file is empty for now; you'll add values to it as you bring up services that need credentials, starting with the object store's access keys in the next chapter. Compose automatically reads a `.env` file sitting next to your `docker-compose.yml`, so any variable you define there is available to your service definitions without extra wiring.
 
 One habit worth adopting alongside this: commit an example file, `.env.example`, that lists the *names* of the variables with placeholder values, and do commit that one. It documents what configuration the project expects without exposing any real secret, so someone setting up the project later knows exactly what to fill in.
 
@@ -196,8 +213,8 @@ If that command failed, the usual causes are: Docker isn't running (start Docker
 You're ready to move on when:
 
 - Docker, Compose, Python, Git, and the AWS CLI are installed and their version commands all work.
-- You have a project directory under version control, laid out with the `lakehouse/` package plus `config/`, `pipelines/`, `dags/`, `ml/`, `data/`, and `tests/`, and `pip install -e .` succeeds so `import lakehouse` works.
-- Your first commit is a `.gitignore` that excludes `.env` and `data/`, and you understand why secrets stay out of version control.
+- You have a project directory under version control, laid out with the `lakehouse/` package plus `config/`, `pipelines/`, `dags/`, `ml/`, `data/`, and `tests/`, with a `.venv` virtual environment activated, and `pip install -e .` succeeds so `import lakehouse` works.
+- Your first commit is a `.gitignore` that excludes `.env`, `data/`, and `.venv/`, and you understand why secrets stay out of version control.
 - `docker run hello-world` printed the welcome message, confirming Docker can pull and run a container.
 
 ## Try it yourself
@@ -218,6 +235,7 @@ You're ready to move on when:
 - The only tools on your host are **Docker (with Compose), Python, Git, and the AWS CLI**; everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
 - Services run as **containers defined in a Compose file**, which is your infrastructure written down: readable, versioned, reproducible.
 - Secrets live in a gitignored **`.env`**, and keeping them out of version control is the first habit you commit.
+- Python work happens inside a project virtual environment (`source .venv/bin/activate`), which keeps the course's packages isolated and sidesteps PEP 668 on modern Linux.
 - You confirmed Docker can pull and run a container, and laid out an installable `lakehouse` project ready for its first real service and its first shared module.
 - **Next, Chapter 3, Storage:** create your first real service, an S3-compatible object store, in the `docker-compose.yml` you'll start for real, and set up the warehouse it holds.
 
