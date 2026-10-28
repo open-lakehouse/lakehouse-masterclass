@@ -1,0 +1,3 @@
+# Build dependencies for the course website (MkDocs Material).
+# Used by .github/workflows/deploy-docs.yml and for local `mkdocs serve`.
+mkdocs-material>=9.5,<10
