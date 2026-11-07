@@ -68,7 +68,7 @@ nav:
   - "2. Setup": chapters/ch02-setup.md
   - "3. Storage": chapters/ch03-storage.md
   - "4. Compute": chapters/ch04-compute.md
-  - "4.5. The Spark Image": chapters/ch04-5-spark-image.md
+  - "4.5. Iceberg for Spark 4.3": chapters/ch04-5-iceberg-runtime.md
   - "5. Tables and Catalog": chapters/ch05-tables-catalog.md
   - "6. Ingestion": chapters/ch06-ingestion.md
   - "7. Transformation": chapters/ch07-transformation.md

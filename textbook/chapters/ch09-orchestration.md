@@ -496,7 +496,7 @@ current = [s for s in meta["snapshots"] if s["snapshot-id"] == meta["current-sna
 print("data files:", current["summary"]["total-data-files"], " snapshots:", len(meta["snapshots"]))
 ```
 
-From the verification run:
+From the verification run (your "before" numbers depend on how long your stream ran; "after" is one file per partition and one snapshot):
 
 ```
 before   data files: 9  snapshots: 12

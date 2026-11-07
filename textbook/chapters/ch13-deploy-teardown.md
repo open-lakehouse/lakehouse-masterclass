@@ -33,7 +33,7 @@ open-lakehouse/
 │   ├── spark/spark-defaults.conf        # Connect server: Kafka jar, UTC, S3, the Iceberg catalog
 │   └── unity-catalog/server.properties  # catalog: storage bucket + credentials
 ├── docker/
-│   ├── spark/Dockerfile    # Spark 4.3.0 + Iceberg runtime + S3 jars + Python 3.12 (Chapter 4.5)
+│   ├── spark/Dockerfile    # Spark 4.3.0 + S3 jars + Python 3.12 (Ch 4), Iceberg runtime (Ch 4.5)
 │   ├── airflow/Dockerfile  # Airflow + a JRE + the Spark Connect client (Chapter 9)
 │   └── mlflow/Dockerfile   # MLflow + boto3 for S3 artifacts (Chapter 11)
 ├── lakehouse/              # the shared package every layer imports

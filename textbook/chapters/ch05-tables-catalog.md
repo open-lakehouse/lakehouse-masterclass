@@ -86,6 +86,8 @@ The catalog wiring (the Iceberg SQL extensions, the REST catalog URI, the wareho
 
 ```properties
 # add to config/spark/spark-defaults.conf (the file you started in Chapter 4)
+# Iceberg's SQL extensions: CALL procedures, branch and tag DDL, MERGE rewrites.
+spark.sql.extensions                           = org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
 spark.sql.catalog.iceberg                      = org.apache.iceberg.spark.SparkCatalog
 spark.sql.catalog.iceberg.type                 = rest
 spark.sql.catalog.iceberg.uri                  = http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
@@ -96,13 +98,18 @@ spark.sql.catalog.iceberg.io-impl              = org.apache.iceberg.aws.s3.S3Fil
 spark.sql.catalog.iceberg.s3.endpoint          = http://seaweedfs:8333
 spark.sql.catalog.iceberg.s3.path-style-access = true
 spark.sql.catalog.iceberg.client.refresh-credentials-enabled = false
+# Iceberg's S3FileIO and the AWS SDK v2 both require a region, even against
+# SeaweedFS; it is supplied by the AWS_REGION env var on the Spark services.
+spark.sql.catalog.iceberg.s3.region            = us-east-1
 ```
 
-Read it top to bottom. The first four lines say "there is a catalog called `iceberg`, it speaks the REST protocol, it lives at this URL, and inside Unity Catalog it's the catalog named `iceberg`." Note the URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is a Unity Catalog catalog name, not an object-storage path.
+Read it top to bottom. The first setting, `spark.sql.extensions`, loads `IcebergSparkSessionExtensions` from the runtime you added in Chapter 4.5. It adds Iceberg's SQL to Spark: the `CALL` procedures (the rollback later in this chapter, the maintenance in Chapter 9), the branch and tag statements, and the rewrites behind `MERGE` on Iceberg tables. Extensions are a static setting, read once when the server starts, so this is exactly the kind of line that has to live here. The next four lines say "there is a catalog called `iceberg`, it speaks the REST protocol, it lives at this URL, and inside Unity Catalog it's the catalog named `iceberg`." Note the URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is a Unity Catalog catalog name, not an object-storage path.
 
 The next three lines are about bytes. When Spark writes a table, it writes the Parquet data files and the manifests itself, straight to SeaweedFS, through Iceberg's own S3 client (`S3FileIO`). That client needs the same endpoint and path-style addressing you set for Hadoop's S3A client in Chapter 4; it doesn't read the `fs.s3a.*` settings.
 
-The last line needs a word of explanation, because without it every write fails. When Spark loads a table, Unity Catalog hands back short-term storage credentials for it ("credential vending") along with an address where the client can come back for fresh ones. Our local setup has no real token service, so Unity Catalog vends the static keys from its config, with no expiry time. Iceberg sees a refresh address, looks for the expiry, finds none, and gives up with `Invalid S3 Credentials: s3.session-token-expires-at-ms not set`. Turning off credential refresh tells Iceberg to simply use the keys it was given. Against real S3 with a token service, you would leave refresh on.
+The `refresh-credentials-enabled` line needs a word of explanation, because without it every write fails. When Spark loads a table, Unity Catalog hands back short-term storage credentials for it ("credential vending") along with an address where the client can come back for fresh ones. Our local setup has no real token service, so Unity Catalog vends the static keys from its config, with no expiry time. Iceberg sees a refresh address, looks for the expiry, finds none, and gives up with `Invalid S3 Credentials: s3.session-token-expires-at-ms not set`. Turning off credential refresh tells Iceberg to simply use the keys it was given. Against real S3 with a token service, you would leave refresh on.
+
+The last line gives Iceberg's S3 client a region. The AWS SDK refuses to work without one, even against SeaweedFS, which ignores it; the Spark services also get it as `AWS_REGION`.
 
 Who writes what, then? Spark writes the data files, the manifests, and the manifest lists. Unity Catalog writes every `metadata.json`: the first one when a table is created, and a new one at every commit. That follows from how the Iceberg REST protocol commits. The client doesn't send a file; it sends the catalog a list of requirements ("the table's `main` branch is still at snapshot X") and a list of updates ("add this snapshot, point `main` at it"), and the catalog answers with the new table metadata and the location of the file that holds it. Unity Catalog 0.7.0 checks the requirements against the current `metadata.json`, applies the updates, writes the result as the next `metadata.json`, and then swaps the table's metadata location to that file in its database, refusing the swap if another commit got there first. That's why Unity Catalog also needs a route to SeaweedFS, which you'll give it in a moment.
 
