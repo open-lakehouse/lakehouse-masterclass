@@ -2,7 +2,7 @@
 # Off camera, after every take: stop anything still running in the panes, restart the
 # Connect server (which stops any query whose client left without stop()), close tmux.
 set -uo pipefail
-D=${FILM_DEMO:-$HOME/masterclass-student/open-lakehouse-dev}
+D=${FILM_DEMO:?set FILM_DEMO to a checkout of the finished course project}
 HERE=$(cd "$(dirname "$0")" && pwd)
 T="tmux -L film2 -f $HERE/tmux.conf"
 for i in 0 1 2; do $T send-keys -t "film:0.$i" C-c 2>/dev/null; done

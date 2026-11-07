@@ -8,11 +8,10 @@ Catalog's Iceberg REST endpoint, shows why: delete, delete, append, append. The 
 follow the chapter section in order; nothing in the film is staged, the race runs live
 against the dev stack.
 
-**Tape:** `refresh-race.tape`. **Needs:** the dev copy of the reference build
-(`~/masterclass-student/open-lakehouse-dev`, compose project `masterclass-dev`) with
+**Tape:** `refresh-race.tape`. **Needs:** a checkout of the finished course project (the code from every chapter, Chapter 13's tree) with
 seaweedfs, spark-master, spark-worker, spark-connect and unity-catalog up, and Silver
 and Gold freshly refreshed by one run on its own (Silver = distinct ids = Gold sum).
-Render with `--demo ~/masterclass-student/open-lakehouse-dev`. Every render runs the
+Render with `--demo <that checkout>`. Every render runs the
 race for real, so restore the tables before and after each one:
 `cd pipelines/medallion && spark-pipelines run --remote $SPARK_REMOTE`.
 

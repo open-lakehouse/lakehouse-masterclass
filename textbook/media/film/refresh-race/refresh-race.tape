@@ -1,6 +1,6 @@
 # The refresh race (Chapter 9, "Two runs at once"): two refreshes of the medallion
 # pipeline at once, both COMPLETED, Silver doubled. Storyboard: storyboard.md.
-#   film render textbook/media/film/refresh-race/refresh-race.tape --demo ~/masterclass-student/open-lakehouse-dev [--format vertical]
+#   film render textbook/media/film/refresh-race/refresh-race.tape --demo <course project> [--format vertical]
 # Every render runs the race for real: restore Silver and Gold with one pipeline run
 # before and after each render (see storyboard.md), and delete renders/*/film.hist.
 Set TypingSpeed 35ms

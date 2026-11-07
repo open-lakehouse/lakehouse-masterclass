@@ -1,7 +1,7 @@
 {
  "about": "Every value the stateful-sessions scene puts on screen, with where it came from.",
  "code": {
-  "file": "~/masterclass-student/open-lakehouse-dev/lakehouse/customer_sessions.py",
+  "file": "lakehouse/customer_sessions.py (the Chapter 8 code)",
   "SESSION_GAP_MS": 15000,
   "WATERMARK": "10 seconds",
   "watermark_ms": 10000,

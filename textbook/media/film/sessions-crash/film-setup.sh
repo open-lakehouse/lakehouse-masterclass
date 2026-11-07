@@ -5,7 +5,7 @@
 #   film-setup.sh landscape|vertical
 set -euo pipefail
 FMT=${1:-landscape}
-D=${FILM_DEMO:-$HOME/masterclass-student/open-lakehouse-dev}
+D=${FILM_DEMO:?set FILM_DEMO to a checkout of the finished course project}
 HERE=$(cd "$(dirname "$0")" && pwd)
 LOG=${FILM_PRODUCER_LOG:-$HERE/renders/producer-$FMT.log}
 mkdir -p "$HERE/renders"

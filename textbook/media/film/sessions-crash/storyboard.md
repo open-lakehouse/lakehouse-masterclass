@@ -9,8 +9,7 @@ spark-connect` under the running query, the client dies, the same command starts
 again on the same checkpoint, and a minute later rows equal distinct visits. The beats
 follow the chapter's steps in order, live against the dev stack.
 
-**Tape:** `sessions-crash.tape`. **Needs:** the dev copy of the reference build
-(`~/masterclass-student/open-lakehouse-dev`, compose project `masterclass-dev`) with
+**Tape:** `sessions-crash.tape`. **Needs:** a checkout of the finished course project (the code from every chapter, Chapter 13's tree) with
 seaweedfs, spark-master, spark-worker, spark-connect, unity-catalog, zookeeper and kafka
 up. `film-setup.sh <format>` resets the sessions table and checkpoint (as
 `data/replay-ch8.sh` does) and builds three tmux panes on their own server (producer,

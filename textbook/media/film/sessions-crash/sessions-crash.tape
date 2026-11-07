@@ -3,8 +3,8 @@
 # One take is one continuous run: the producer and the job keep running between beats in
 # tmux panes on their own server, and every clip attaches to it. So never --only a beat;
 # render the whole tape, between the off-camera helpers:
-#   film-setup.sh landscape && film render sessions-crash.tape --demo ~/masterclass-student/open-lakehouse-dev; film-teardown.sh
-#   film-setup.sh vertical  && film render sessions-crash.tape --demo ~/masterclass-student/open-lakehouse-dev --format vertical; film-teardown.sh
+#   film-setup.sh landscape && film render sessions-crash.tape --demo <course project>; film-teardown.sh
+#   film-setup.sh vertical  && film render sessions-crash.tape --demo <course project> --format vertical; film-teardown.sh
 # The waits (visits closing, the server coming back) are cut with Hide/Sleep at the ends
 # of beats.
 Set TypingSpeed 20ms
