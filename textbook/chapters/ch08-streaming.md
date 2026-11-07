@@ -631,7 +631,7 @@ These are the visits still open: `c-17`'s visit started at `1794004712091` and i
 docker compose restart spark-connect
 ```
 
-The `customer_sessions` client exits with an error once its server is gone. Wait for the server to come back (`docker compose logs spark-connect | grep "Spark Connect server started"`), start the job again with the same command, and let it run for a minute. Then:
+The `customer_sessions` client keeps retrying while the server is down, then fails once the server is back, with `INVALID_HANDLE.SESSION_NOT_FOUND`: its session died with the old server. When the server is up again (`docker compose logs spark-connect | grep "Spark Connect server started"`), start the job again with the same command and let it run for a minute. Then:
 
 ```python
 spark.sql("""
