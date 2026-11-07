@@ -35,7 +35,7 @@ Why is this such a big deal? Because different engines are good at different thi
 
 ![One catalog, many engines](../figures/ch10/fig-10.2-multi-engine.svg)
 
-**Figure 10.2**. Spark, DuckDB, DataFusion, and BI tools all read the same Iceberg Gold tables through the one Unity Catalog OSS REST endpoint, with no data copied.
+**Figure 10.2**. Every engine reads the same Iceberg Gold tables through the one Unity Catalog OSS REST endpoint, with no data copied. This chapter runs two of them, Spark and DuckDB; DataFusion and the BI tool stand for any other Iceberg REST client.
 
 ### Under the hood: serving vs. a closed warehouse
 
@@ -163,7 +163,7 @@ Expected: the most recent snapshots of Gold, alternating `append` and `delete`. 
 
 Notice also what you *did* have to tell DuckDB: the storage endpoint and keys. The catalog is shared, but every engine still needs a network path to the bytes. In the cloud, that's usually handled by credential vending plus the provider's standard S3 endpoint, which is why a real deployment needs less configuration here than a local SeaweedFS does.
 
-> Note: DuckDB and DataFusion are optional garnish, nice for proving the point and for lightweight local analytics. Unity Catalog OSS is the one catalog everything goes through; the second engine is interchangeable.
+> Note: DuckDB is optional garnish, nice for proving the point and for lightweight local analytics. Unity Catalog OSS is the one catalog everything goes through; the second engine is interchangeable.
 
 **Step 5 (optional): point a BI tool or notebook at the same catalog.** Any Iceberg-REST-aware client uses the identical endpoint and sees the identical tables, subject to the same two questions: how it authenticates to the catalog, and how it reaches object storage.
 
@@ -204,7 +204,7 @@ Notice also what you *did* have to tell DuckDB: the storage endpoint and keys. T
 
 - Serving exposes finished data to consumers, engine-neutrally, the last mile that makes the pipeline count.
 - One Iceberg REST catalog (Unity Catalog OSS) lets many engines read the same tables, with no copies, no drift, one authoritative version.
-- DuckDB and DataFusion are optional second engines; the catalog is the constant.
+- DuckDB is an optional second engine, and any Iceberg REST client could take its place; the catalog is the constant.
 - **Next, Chapter 11, AI:** train a model on the Gold table and track it with MLflow, the data feeding intelligence.
 
 ![Progress: Serving complete, AI next](../figures/ch10/fig-10.3-progress-serving-done.svg)

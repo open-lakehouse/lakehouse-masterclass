@@ -72,7 +72,7 @@ Every command in this book is written for a Linux shell (bash, `apt`, and so on)
 The point of running everything in containers is that your host stays clean, so the list of things you install directly is short. Four tools:
 
 - **Docker, with the Compose plugin.** This is the one that matters. It runs every service in the stack, so if you install nothing else, install this. Follow Docker's official install guide for your OS, it's kept current and is the authoritative source: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/), [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) (enable the WSL2 backend when prompted), or [Docker Engine](https://docs.docker.com/engine/install/) on Linux (install the `docker-compose-plugin` package alongside it). A couple of notes the guides don't stress: use `docker compose` (two words, the built-in plugin), not the deprecated standalone `docker-compose`; and on Linux, add your user to the `docker` group so you don't need `sudo` for every command.
-- **Python 3.10 or newer.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day.
+- **Python 3.12.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day. The version is pinned, not a minimum. PySpark 4.3 needs Python 3.11 or newer, and the course uses 3.12 because that is the Python inside the Spark image you build in Chapter 4. Some of your Python code runs on the cluster, not on your laptop (Python UDFs, and the stateful processor in Chapter 8), in a Python worker that the Spark server starts, and PySpark refuses to run it when the worker's minor version differs from your client's, failing with `[PYTHON_VERSION_MISMATCH] Python in worker has different version`. Ubuntu 24.04 ships 3.12 as `python3`; on macOS, `brew install python@3.12`; on older Linux releases, install it from your distribution's backports (on Ubuntu 22.04, the deadsnakes PPA provides `python3.12` and `python3.12-venv`).
 - **Git.** To version your project: the Compose file, config, and pipeline code you build. Assume you have it; if not, install it.
 - **The AWS CLI.** Your object store speaks the S3 API, and the AWS CLI is the standard way to poke at S3 from the command line, create buckets, copy files, list objects, whether the store is Amazon S3 or your local one. Install version 2 with [AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) or your OS package manager. You'll first use it in the next chapter to talk to your object store, through a dedicated `lakehouse` profile so the course never touches any real AWS configuration you already have.
 
@@ -85,7 +85,7 @@ After installing, confirm the tools are present:
 ```bash
 docker --version
 docker compose version
-python3 --version
+python3.12 --version
 git --version
 aws --version
 ```
@@ -125,8 +125,11 @@ Make `lakehouse` an installable package so `import lakehouse` works from anywher
 [project]
 name = "lakehouse"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = ["pyspark[connect]==4.1.0"]   # the Spark Connect client (+ pandas, pyarrow, grpc)
+requires-python = ">=3.12,<3.13"   # must match the Spark image's Python (docker/spark/Dockerfile)
+dependencies = [
+    "pyspark[connect]==4.3.0",   # the Spark Connect client (+ pandas, pyarrow, grpc)
+    "pandas<3",                  # PySpark 4.3 does not fully support pandas 3 yet
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -136,20 +139,22 @@ build-backend = "setuptools.build_meta"
 packages = ["lakehouse"]
 ```
 
+Three pins in it are deliberate. `requires-python` admits only 3.12, so `pip install -e .` on any other Python stops with `Package 'lakehouse' requires a different Python` instead of building an environment whose cluster-side code fails later. `pyspark[connect]==4.3.0` is exactly the Spark version of the server you start in Chapter 4. And `pandas<3` keeps pandas on the 2.x line, because PySpark 4.3 does not fully support pandas 3 yet and warns when it finds it.
+
 Before installing anything, give the project its own Python environment. A **virtual environment** is a private copy of the Python package directory that belongs to this one project, so the course's packages never collide with your system's or another project's. It's also not optional on current Linux distributions: Ubuntu 24.04 and Debian 12 mark the system Python as "externally managed" (PEP 668), and a plain `pip install` there fails with `error: externally-managed-environment`. Create the environment once and activate it in every new terminal you open for this project:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate      # your prompt now starts with (.venv)
 ```
 
-(On Debian and Ubuntu, if `python3 -m venv` complains that `ensurepip` is unavailable, install the `python3-venv` package with `apt` and run it again.)
+(On Debian and Ubuntu, if `python3.12 -m venv` complains that `ensurepip` is unavailable, install the `python3.12-venv` package with `apt` and run it again. Creating the environment with `python3.12` is what fixes its version: inside the activated environment, `python` is 3.12 whatever your system's default `python3` is.)
 
 Then install the package in editable mode, so it's importable and your edits are picked up live without reinstalling:
 
 ```bash
 pip install -e .
-python -c "import lakehouse, pyspark; print('ok', pyspark.__version__)"   # -> ok 4.1.0
+python -c "import lakehouse, pyspark; print('ok', pyspark.__version__)"   # -> ok 4.3.0
 ```
 
 Why `pyspark[connect]` and not just `pyspark`? The bare package installs the Spark libraries but not the Spark Connect client's dependencies (pandas, PyArrow, and gRPC). Without them the first `SparkSession.builder.remote(...)` call in Chapter 4 fails with `PySparkImportError: [PACKAGE_NOT_INSTALLED] Pandas >= 2.2.0 must be installed`. The `[connect]` extra pulls them in.
@@ -194,7 +199,7 @@ This `.env` approach is right for local development, and it's worth being honest
 
 ![A secret kept in a gitignored .env is injected into the container at runtime, never hardcoded or committed](../figures/ch02/fig-2.6-secret-flow.svg)
 
-**Figure 2.6**. The pattern: a secret lives in a gitignored `.env`, Compose references it by name, and the container receives it as an environment variable at runtime. The three anti-patterns below all commit the secret in some form.
+**Figure 2.6**. The pattern: a secret lives in a gitignored `.env`, Compose references it by name, and the container receives it as an environment variable at runtime, under whatever name the service expects (here `S3_SECRET_KEY` from `.env` becomes the container's `AWS_SECRET_ACCESS_KEY`). The three anti-patterns below all commit the secret in some form.
 
 ## Verify Docker works
 

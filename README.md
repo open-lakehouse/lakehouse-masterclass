@@ -43,7 +43,7 @@ Start here → **[textbook/README.md](textbook/README.md)**, then read **[textbo
 
 ## 🗺️ The curriculum
 
-You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters, twelve layers, one working system.
+You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters, ten layers of the stack (Chapters 3 to 12), one working system.
 
 | # | Chapter | The layer you build | The payoff |
 |---|---------|--------------------|------------|

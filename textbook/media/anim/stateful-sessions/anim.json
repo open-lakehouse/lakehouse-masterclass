@@ -1,0 +1,13 @@
+{
+ "backend": "hf",
+ "themes": [
+  "paper",
+  "ide"
+ ],
+ "formats": [
+  "portrait",
+  "square",
+  "landscape"
+ ],
+ "title": "transformWithState sessions"
+}

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="theme.css" />
+    <script src="theme.js"></script>
+    <script src="spark.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: var(--a-w); height: var(--a-h); overflow: hidden; background: var(--a-bg); }
+    </style>
+  </head>
+  <body>
+    <!-- `anim render` rewrites data-width/data-height per format; leave them as they are. -->
+    <div id="main" data-composition-id="main" data-start="0" data-duration="39" data-width="1080" data-height="1920">
+      <div id="stage"></div>
+    </div>
+    <script>
+      // Storyboard: storyboard.md. Constants from customer_sessions.py and schematic events, both via data.json.
+      const D = (() => { const r = new XMLHttpRequest(); r.open("GET", "data.json", false); r.send(); return JSON.parse(r.responseText); })();
+      const C = D.code, B = D.timing.beats, EV = D.schematic.events;
+      const GAP = C.SESSION_GAP_MS, WM = C.watermark_ms;
+      A.mount();
+      const K = A.T.sans === A.T.mono ? 0.82 : 1;        // ide sets everything in a monospace face: long lines shrink to fit
+      const titled = (t, s) => { A.title(t); A.text(s, { y: 0.075 + A.dy(A.portrait ? 96 : 84), size: 34 * K, weight: 400, color: "var(--a-mute)" }); };
+
+      // ---------------------------------------------------------------- layout (fractions of the usable frame)
+      const Y = { cap: 0.217, wmLabel: 0.258, lanes: { "c-1": 0.33, "c-2": 0.415 }, axis: 0.475, ticks: 0.505, consts: 0.53,
+                  panel: 0.665, outLabel: 0.818, table: 0.89 };
+      const X0 = 0.14, X1 = 0.94, TMAX = D.schematic.axis_max_s;
+      const ex = (s) => X0 + (X1 - X0) * s / TMAX;          // event time (s) -> x
+      const shift = (s) => A.X(ex(s) - ex(0));                // px offset from the axis origin
+      const hide = (els) => gsap.set([].concat(els), { opacity: 0 });
+      const show = (els, t) => A.tl.set([].concat(els), { opacity: 1 }, t);
+      const gone = (els, t) => A.tl.set([].concat(els), { opacity: 0 }, t);
+      const pulse = (el, t, k = 1.25) => { A.tl.set(el, { scale: k }, t); A.tl.to(el, { scale: 1, duration: 0.5, ease: "power2.out" }, t); };
+      const fmt = (v) => v.toFixed(2);
+
+      // ---------------------------------------------------------------- beat open (0.0): on screen at frame 0, no fade
+      titled("transformWithState", "one open visit per customer, closed by an event-time timer");
+      let curCap = A.text("visits live in the state store", { y: Y.cap, size: 30 * K, weight: 500 });
+      function caption(t, s) {
+        const c = A.text(s, { y: Y.cap, size: 30 * K, weight: 500 }); hide(c);
+        A.out(curCap, t - 0.3, { dur: 0.3 }); A.in(c, t); curCap = c;
+      }
+
+      // lanes and the event-time axis
+      for (const [cust, y] of Object.entries(Y.lanes)) {
+        A.text(cust, { x: 0.065, y, size: 30, weight: 700, mono: true });
+        A.line({ x1: X0, y1: y, x2: X1, y2: y, color: "var(--a-line)", width: 3 });
+      }
+      A.line({ x1: X0, y1: Y.axis, x2: X1, y2: Y.axis, color: "var(--a-mute)", width: 2 });
+      for (let s = 0; s <= 50; s += 10) A.text(`${s} s`, { x: ex(s), y: Y.ticks, size: 20, color: "var(--a-mute)" });
+      A.text("event time", { x: 0.065, y: Y.ticks, size: 18, color: "var(--a-mute)" });
+
+      // the watermark: a line over both lanes, label above; moves with x only
+      const wmTop = Y.lanes["c-1"] - A.dy(52), wmBot = Y.axis;
+      const wmLine = A.line({ x1: ex(0), y1: wmTop, x2: ex(0), y2: wmBot, color: "var(--a-ink)", width: 4 });
+      const wmLabels = {};
+      const wmLabel = (s) => (wmLabels[s] = wmLabels[s] || A.text(`watermark ${s} s`, { x: ex(0), y: Y.wmLabel, size: 22, weight: 600, mono: true }));
+      let wmNow = 0;
+      const wmEls = () => [wmLine, ...Object.values(wmLabels)];
+      wmLabel(0);
+      function moveWatermark(ms, t) {
+        const s = ms / 1000, lab = wmLabel(s);
+        gsap.set(lab, { x: shift(wmNow) }); hide(lab);
+        A.tl.to(wmEls(), { x: shift(s), duration: 0.6, ease: "power2.inOut" }, t);
+        gone(wmLabels[wmNow], t); show(lab, t);
+        wmNow = s;
+      }
+
+      // state store panels, one per key
+      const PX = { "c-1": 0.27, "c-2": 0.73 }, PW = 470, PH = 250;
+      const P = {};
+      for (const cust of Object.keys(PX)) {
+        const left = PX[cust] - A.dx(PW / 2) + A.dx(24), top = Y.panel - A.dy(PH / 2);
+        A.box({ x: PX[cust], y: Y.panel, w: PW, h: PH, kind: "paper" });
+        A.text(`key ${cust}`, { x: left, y: top + A.dy(30), size: 26, weight: 700, anchor: "left", mono: true });
+        A.text("ValueState visit · MapState orders", { x: left + A.dx(130), y: top + A.dy(31), size: 17 * K, color: "var(--a-mute)", anchor: "left" });
+        const row = (i) => top + A.dy(66 + 32 * i);
+        const empty = A.text("no state for this key", { x: PX[cust], y: Y.panel + A.dy(14), size: 22, color: "var(--a-mute)" });
+        P[cust] = { left, row, empty, visit: null, timer: null, orders: {}, n: 0, all: [], tick: null, dots: [] };
+      }
+      const rowText = (p, i, s, color = "var(--a-fg)") => A.text(s, { x: p.left, y: p.row(i), size: 20, mono: true, anchor: "left", color });
+      function swapRow(p, key, el, t) {
+        hide(el);
+        if (p[key]) gone(p[key], t);
+        show(el, t); p[key] = el; p.all.push(el);
+      }
+
+      // timer markers on the lanes
+      function marker(cust) {
+        const y = Y.lanes[cust];
+        const tick = A.line({ x1: ex(0), y1: y - A.dy(26), x2: ex(0), y2: y + A.dy(26), color: "var(--a-acc)", width: 5 });
+        const lab = A.text("timer", { x: ex(0), y: y - A.dy(42), size: 18, weight: 600, color: "var(--a-acc)" });
+        hide([tick, lab]);
+        return [tick, lab];
+      }
+
+      // ---------------------------------------------------------------- the processor, step for step as customer_sessions.py
+      // handleInputRows: visit (start_ms, last_ms); orders[order_id] = (amount, status); timer at last_ms + SESSION_GAP_MS.
+      // Rows behind the watermark never reach it. handleExpiredTimer -> _close: emit a row, clear orders and visit.
+      const state = {}, out = [];
+      let maxTs = 0, wmMs = 0;
+      const closeAt = {};
+      for (const e of EV) {
+        const p = P[e.customer], ts = e.ts_s * 1000, y = Y.lanes[e.customer], t = e.at;
+        const dot = A.dot({ x: ex(e.ts_s), y, r: 14, color: e.late ? "var(--a-mute)" : "var(--a-acc)" });
+        const lab = A.text(e.order_id, { x: ex(e.ts_s), y: y + A.dy(30), size: 18, mono: true, color: "var(--a-mute)" });
+        if (e.resent) {                       // lands on the dot already there
+          A.tl.fromTo(dot, { opacity: 0, y: -A.px(70) }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.in" }, t);
+          pulse(dot, t + 0.5, 1.8); gone(dot, t + 1.0);
+          hide(lab);
+        } else {
+          A.tl.fromTo([dot, lab], { opacity: 0, y: -A.px(70) }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.in" }, t);
+          if (!e.late) p.dots.push(dot, lab);
+        }
+        if (ts < wmMs) {                      // late: behind the watermark, dropped before the processor
+          const tag = A.text(`late: ${e.ts_s} s < watermark ${wmMs / 1000} s, dropped`, { x: ex(e.ts_s) + A.dx(16), y: y - A.dy(40), size: 20 * K, weight: 600, color: "var(--a-mute)", anchor: "right" });
+          hide(tag); A.in(tag, t + 0.6);
+          A.out([dot, lab], t + 2.6, { dur: 0.6 }); A.out(tag, t + 4.0, { dur: 0.5 });
+          continue;
+        }
+        const s = state[e.customer] || (state[e.customer] = { visit: null, orders: {}, timer: null });
+        const at = t + 0.5;
+        if (s.visit && ts - s.visit.last > GAP) throw new Error("gap close inside a batch is not drawn in this scene");
+        if (s.visit && ts < s.visit.start - GAP) throw new Error("an order older than start - gap is skipped by the code; not drawn here");
+        if (s.visit) { s.visit.start = Math.min(s.visit.start, ts); s.visit.last = Math.max(s.visit.last, ts); }
+        else s.visit = { start: ts, last: ts };
+        const isNew = !(e.order_id in s.orders);
+        s.orders[e.order_id] = [e.amount, e.status];
+        const oldTimer = s.timer; s.timer = s.visit.last + GAP;
+
+        if (!p.visit) gone(p.empty, at);
+        const vtxt = `visit  start_ms=${s.visit.start}  last_ms=${s.visit.last}`;
+        if (!p.visit || p.visit.textContent !== vtxt) swapRow(p, "visit", rowText(p, 0, vtxt), at);
+        const ttxt = `timer  ${s.timer} = last_ms + ${GAP}`;
+        if (!p.timer || p.timer.textContent !== ttxt) swapRow(p, "timer", rowText(p, 1, ttxt, "var(--a-acc)"), at);
+        const otxt = `orders[${e.order_id}] = ${fmt(e.amount)}, ${e.status}`;
+        if (isNew) { const r = rowText(p, 2 + p.n++, otxt); hide(r); show(r, at); p.orders[e.order_id] = r; p.all.push(r); }
+        else pulse(p.orders[e.order_id], at, 1.12);
+
+        // the timer marker on the lane
+        if (!p.tick) { p.tick = marker(e.customer); gsap.set(p.tick, { x: shift(s.timer / 1000) }); show(p.tick, at); }
+        else if (oldTimer !== s.timer) A.tl.to(p.tick, { x: shift(s.timer / 1000), duration: 0.6, ease: "power2.inOut" }, at);
+        else pulse(p.tick[0], at, 1.3);
+
+        // the watermark trails the latest event time by WATERMARK
+        maxTs = Math.max(maxTs, ts);
+        const nextWm = Math.max(wmMs, maxTs - WM);
+        if (nextWm > wmMs) { wmMs = nextWm; moveWatermark(wmMs, t + 0.9); }
+
+        // handleExpiredTimer for every key whose timer the watermark has passed
+        for (const [cust, st] of Object.entries(state)) {
+          if (!st.visit || wmMs <= st.timer) continue;
+          const q = P[cust], vals = Object.values(st.orders);
+          out.push({ customer_id: cust, start: st.visit.start, end: st.visit.last, orders: vals.length,
+                     revenue: vals.filter(([, stt]) => stt !== "cancelled").reduce((a, [amt]) => a + amt, 0), cancelled: vals.filter(([, stt]) => stt === "cancelled").length, closed_by: "timer" });
+          closeAt[cust] = t;
+          pulse(q.tick[0], t + 1.7, 1.6); pulse(q.tick[1], t + 1.7, 1.3);
+          A.out([...q.tick], t + 3.1, { dur: 0.4 });
+          A.out(q.all, t + 3.1, { dur: 0.4 });
+          A.tl.to(q.dots, { opacity: 0.3, duration: 0.4 }, t + 3.1);
+          show(q.empty, t + 3.5);
+          st.visit = null; st.orders = {}; st.timer = null;
+          const row = out[out.length - 1];
+          const label = A.text(`appended to ${C.table}`, { y: Y.outLabel, size: 22, weight: 600, mono: true, color: "var(--a-ok)" });
+          const tbl = A.table(["customer_id", "session_start", "session_end", "orders", "revenue", "cancelled", "closed_by"],
+            [[row.customer_id, `t0+${row.start / 1000}s`, `t0+${row.end / 1000}s`, row.orders, fmt(row.revenue), row.cancelled, row.closed_by]],
+            { y: Y.table, w: 1000, size: 19 * K, hi: 0 });
+          hide([label, tbl]); A.in([label, tbl], t + 2.3);
+        }
+      }
+
+      // ---------------------------------------------------------------- captions per beat
+      caption(B.orders, `each order: last_ms, orders[order_id], timer = last_ms + ${GAP / 1000} s`);
+      caption(B.dup, "re-sent o-2 writes key o-2 again: nothing changes");
+      caption(B.more, `watermark = latest event time − ${WM / 1000} s`);
+      caption(B.close, "watermark passes c-1's timer: one row out, c-1 state cleared");
+      caption(B.late, "o-4 at 20 s is behind the watermark: dropped");
+      const c2 = state["c-2"];
+      caption(B.end, `c-2 stays open until the watermark passes ${c2.timer / 1000} s`);
+
+      A.text(`customer_sessions.py:  SESSION_GAP_MS = ${GAP}   WATERMARK = "${C.WATERMARK}"`, { y: Y.consts, size: 19 * K, mono: true, color: "var(--a-mute)" });
+      A.in(A.note(D.timing.note), 0.5);
+      A.finish(D.timing.length);
+    </script>
+  </body>
+</html>

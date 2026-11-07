@@ -41,7 +41,7 @@ Picture the world without MLflow, because most people have lived it. You train a
 
 ### Under the hood: reproducibility from snapshots
 
-Because you train on an Iceberg Gold table, you can log the table's snapshot id as a run parameter. That means a year later you can reconstruct the exact training set by time-traveling to that snapshot (Chapter 5). Data versioning plus model versioning equals end-to-end reproducibility, something classic ML setups struggle to guarantee. This is the single most powerful idea in the chapter: when your data lives in a versioned table and your models live in a versioned registry, the entire chain from raw data to deployed model is reproducible. That's rare, and it's a direct consequence of building on a lakehouse.
+Because you train on an Iceberg Gold table, you can log the table's snapshot id as a run parameter, and later reconstruct the exact training set by time-traveling to that snapshot (Chapter 5). That works only while the snapshot still exists, and Chapter 9's maintenance job expires old snapshots and deletes the files only they referenced. So the training script also puts an Iceberg tag on the snapshot it trained on, one per MLflow run; `expire_snapshots` never removes a snapshot a live tag points at, and the tag here is kept for a year. Data versioning plus model versioning equals end-to-end reproducibility, something classic ML setups struggle to guarantee. This is the single most powerful idea in the chapter: when your data lives in a versioned table and your models live in a versioned registry, the entire chain from raw data to deployed model is reproducible. That's rare, and it's a direct consequence of building on a lakehouse.
 
 ## Build: train, track, register
 
@@ -118,12 +118,14 @@ GOLD = f"{CATALOG}.gold.daily_revenue"
 MLFLOW_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 
 
-def load_training_data(spark):
-    """Pin the read to one snapshot and return (snapshot_id, pandas DataFrame).
-    Reading *at* the snapshot we log, rather than "whatever is current", is what
-    makes the logged lineage true even if Gold is refreshed mid-run."""
+def load_training_data(spark, tag):
+    """Tag Gold's current snapshot, read the table at that tag, and return
+    (snapshot_id, pandas DataFrame). Reading *at* the snapshot we log, rather than
+    "whatever is current", keeps the logged lineage true even if Gold is refreshed
+    mid-run; the tag keeps that snapshot from being expired (Chapter 9)."""
     snap = spark.sql(f"SHOW TBLPROPERTIES {GOLD} ('current-snapshot-id')").collect()[0]["value"]
-    pdf = (spark.read.option("versionAsOf", snap).table(GOLD)
+    spark.sql(f"ALTER TABLE {GOLD} CREATE TAG `{tag}` AS OF VERSION {snap} RETAIN 365 DAYS")
+    pdf = (spark.read.option("versionAsOf", tag).table(GOLD)
                 .selectExpr("order_date", "status",
                             "CAST(revenue AS DOUBLE) AS revenue",   # DECIMAL -> float for sklearn
                             "order_count")
@@ -133,21 +135,23 @@ def load_training_data(spark):
 
 def train(features=("revenue",)):
     spark = get_spark("train-order-count")
-    snap, pdf = load_training_data(spark)
-    pdf["is_cancelled"] = (pdf["status"] == "cancelled").astype(int)   # a second candidate feature
-    X, y = pdf[list(features)], pdf["order_count"]
-
     mlflow.set_tracking_uri(MLFLOW_URI)
     mlflow.set_experiment("orders-baseline")
     with mlflow.start_run() as run:
+        tag = f"mlflow-{run.info.run_id}"                    # one Iceberg tag per run
+        snap, pdf = load_training_data(spark, tag)
+        pdf["is_cancelled"] = (pdf["status"] == "cancelled").astype(int)   # a second candidate feature
+        X, y = pdf[list(features)], pdf["order_count"]
+
         model = LinearRegression().fit(X, y)
         mlflow.log_param("gold_table", GOLD)
         mlflow.log_param("gold_snapshot_id", snap)          # data lineage
+        mlflow.log_param("gold_tag", tag)                   # kept through snapshot expiry
         mlflow.log_param("features", ",".join(features))
         mlflow.log_param("training_rows", len(pdf))
         mlflow.log_metric("r2", model.score(X, y))          # a metric to compare runs
         info = mlflow.sklearn.log_model(model, name="model", input_example=X.head(3))
-    print(f"run {run.info.run_id}: r2={model.score(X, y):.4f} on {len(pdf)} rows, snapshot {snap}")
+    print(f"run {run.info.run_id}: r2={model.score(X, y):.4f} on {len(pdf)} rows, snapshot {snap}, tag {tag}")
     print(f"model uri: {info.model_uri}")
     return info.model_uri
 
@@ -165,17 +169,17 @@ python ml/train.py
 Expected: MLflow prints links to the run and the experiment, then the script's own summary. From a verification run with the Chapter 9 backfill loaded (more days means more Gold rows; with only one day loaded you'll have far fewer):
 
 ```
-run f384b1c2...: r2=0.9984 on 27 rows, snapshot 4778004762130462748
+run f384b1c2...: r2=0.9984 on 27 rows, snapshot 4778004762130462748, tag mlflow-f384b1c2...
 model uri: models:/m-4d6e08c2...
 ```
 
 In the UI, a new run appears under the `orders-baseline` experiment, showing the `r2` metric, the params (including `gold_snapshot_id` and `training_rows`), and the saved model with its files (`MLmodel`, `model.pkl`, the environment files, an input example). Those files are real objects in your bucket, under `s3://lakehouse/mlflow-artifacts/`; list them with the S3 CLI from Chapter 3 if you want to see them.
 
-**What just happened?** Look at `load_training_data`, because it is the reproducibility idea from the last section done carefully. It asks Iceberg for the table's current snapshot id, then reads the table *at that snapshot* (`versionAsOf`) and logs the same id on the run. The order matters. If you logged "the latest snapshot" and separately read "the table", a Gold refresh landing between the two calls (your Airflow DAG runs daily, after all) would leave the run claiming data it never trained on. Pinning the read to the logged snapshot makes the lineage true by construction. A year from now, "what data trained this model?" has an exact answer, and `spark.read.option("versionAsOf", <that id>)` gets you the identical rows.
+**What just happened?** Look at `load_training_data`, because it is the reproducibility idea from the last section done carefully. It asks Iceberg for the table's current snapshot id, tags that snapshot `mlflow-<run id>` (`CREATE TAG ... RETAIN 365 DAYS`), reads the table *at that tag* (`versionAsOf` takes a tag name as well as an id), and logs both the id and the tag on the run. The order matters. If you logged "the latest snapshot" and separately read "the table", a Gold refresh landing between the two calls (your Airflow DAG runs daily, after all) would leave the run claiming data it never trained on. Pinning the read to the logged snapshot makes the lineage true by construction. Months from now, "what data trained this model?" has an exact answer, and `spark.sql("SELECT * FROM iceberg.gold.daily_revenue VERSION AS OF '<gold_tag>'")` gets you the identical rows, even after the snapshots around it have been expired. That is why the run is opened first: the tag is named after the run, so each model's training snapshot has its own name.
 
-Three smaller details:
+Smaller details:
 
-- **Why `SHOW TBLPROPERTIES`, not the `.snapshots` metadata table?** Iceberg's metadata tables are the usual way to ask for snapshot ids, but with Unity Catalog 0.7 they fail through the REST catalog (Chapter 5 explains why). Iceberg also publishes the current snapshot id as a table property, which works everywhere.
+- **Why `SHOW TBLPROPERTIES`, not the `.snapshots` metadata table?** Iceberg's metadata tables are the usual way to ask for snapshot ids, but with Unity Catalog 0.7 they fail through the REST catalog (Chapter 5 explains why). Iceberg's Spark integration reports the current snapshot id as `current-snapshot-id` in the table's properties. It is a reserved property, not one stored in the table's properties map: Iceberg's Spark table adds it from the loaded `metadata.json` each time Spark asks for the properties, so it works whichever catalog serves the table. (Setting it with `ALTER TABLE ... SET TBLPROPERTIES` isn't a property write either; Iceberg treats it as "make this snapshot current.")
 - **The `CAST(revenue AS DOUBLE)`.** Silver made money an exact `DECIMAL` (Chapter 7). That's right for revenue reports, but scikit-learn wants plain floats, so the cast happens at the edge, where the data enters the model.
 - **`log_model(..., name="model", input_example=...)`.** MLflow 3 treats a logged model as a first-class object with its own id and URI (`models:/m-...`), which the script returns. The input example records what a valid input looks like, so anyone loading the model later knows its expected columns.
 
@@ -232,7 +236,7 @@ A note on honesty about the model itself: a regression with a near-perfect `r2` 
 - **`NoSuchNamespaceException: Schema not found: iceberg.gold.daily_revenue`.** You queried the `.snapshots` metadata table (`iceberg.gold.daily_revenue.snapshots`). With Unity Catalog 0.7.0 these lookups fail (Chapter 5; fixed in the release after it). Use `SHOW TBLPROPERTIES ... ('current-snapshot-id')` as `train.py` does.
 - **`Time travel option snapshot-id is no longer supported`.** Use `versionAsOf`, as in `load_training_data`.
 - **scikit-learn complains about `Decimal` values.** The `revenue` column reached pandas as `DECIMAL`. Cast it to `DOUBLE` in the Spark read, as `train.py` does.
-- **`r2` is `nan` or the fit fails.** Gold has too few rows (fewer than two). Load more days (`make ingest DATE=...` or the Chapter 9 backfill) and refresh Silver and Gold.
+- **`r2` is `nan` or the fit fails.** Gold has too few rows (fewer than two). Load more days (the Chapter 9 backfill, or `python -m lakehouse.generate <date>` and `python -m lakehouse.ingest <date>` from Chapter 6) and refresh Silver and Gold through the Airflow DAG.
 - **`.toPandas()` is slow or runs out of memory.** You're pulling a table into local memory. Fine for a small Gold table like ours; for big data you'd sample or train distributed.
 - **`register_model` warns that the run has no artifacts at path `model`.** You registered `runs:/<run_id>/model`. It still works through MLflow 3's fallback; register the `model_uri` returned by `log_model` instead.
 
@@ -242,12 +246,12 @@ A note on honesty about the model itself: a regression with a near-perfect `r2` 
 - You read `iceberg.gold.daily_revenue` as training data over `sc://`.
 - A run logged params (including the Gold snapshot id it actually read), the `r2` metric, and a model whose files are in `s3://lakehouse/mlflow-artifacts/`.
 - You registered the model, can see a versioned entry in the registry, and loaded it back by `models:/orders-order-count/<version>`.
-- You can explain how snapshots make the training set reproducible.
+- You can explain how snapshots make the training set reproducible, and why the run also tags its snapshot.
 
 ## Try it yourself
 
 1. **Run the comparison for real.** Train three times with different features or parameters, then sort the runs by `r2` in the UI and identify the best. You've now used tracking the way real teams do.
-2. **Prove reproducibility.** Copy the `gold_snapshot_id` from a run in the UI, refresh Gold (re-run Chapter 7's pipeline, or let the DAG run), then read `spark.read.option("versionAsOf", <id>).table("iceberg.gold.daily_revenue")` and compare it to what the run trained on (`training_rows`). The current table moved on; the snapshot didn't.
+2. **Prove reproducibility through expiry.** Copy the `gold_tag` from a run in the UI and refresh Gold (re-run Chapter 7's pipeline, or let the DAG run). Then expire everything you can: `CALL iceberg.system.expire_snapshots(table => 'gold.daily_revenue', older_than => TIMESTAMP '<now, UTC>', retain_last => 1)`. Read `VERSION AS OF '<gold_tag>'` and compare its row count to the run's `training_rows`. The current table moved on and the older snapshots are gone; the tagged one is still there.
 3. **Promote a version.** MLflow 3 promotes models with *aliases* rather than the older fixed stages. Point an alias at a version with `mlflow.MlflowClient().set_registered_model_alias("orders-order-count", "staging", <version>)`, then load it by role instead of number: `mlflow.sklearn.load_model("models:/orders-order-count@staging")`. Move the alias to a newer version and the same load picks it up. "What's the current staging model?" is now a precise answer, not a guess.
 4. **Explain the pattern.** In two sentences, explain to an imaginary ML colleague why training on a Gold Iceberg table beats training on an exported CSV.
 
@@ -262,7 +266,7 @@ A note on honesty about the model itself: a regression with a near-perfect `r2` 
 
 - The lakehouse is a natural AI foundation: clean, versioned, served, scheduled data, reproducible training data for free.
 - Experiment tracking logs params, metrics, and artifacts so runs are comparable; the model registry versions and promotes models.
-- Logging the Gold snapshot id ties model lineage to exact data, full reproducibility from raw data to deployed model.
+- Logging the Gold snapshot id ties model lineage to exact data, and tagging that snapshot keeps it through snapshot expiry: full reproducibility from raw data to deployed model.
 - **Next, Chapter 12, Agents:** let an LLM agent operate the lakehouse through the same interfaces you've used, SQL over Spark Connect and the catalog.
 
 ![Progress: AI complete, Agents next](../figures/ch11/fig-11.3-progress-ai-done.svg)

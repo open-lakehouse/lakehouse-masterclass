@@ -7,6 +7,23 @@ part of the textbook and students never need it.
 - Native Iceberg end to end via Unity Catalog 0.7's writable Iceberg REST catalog.
   No Delta, no UniForm.
 
+## Spark 4.3 move, verified 2026-11-06
+
+The reference build (`open-lakehouse`, branch `spark-4.3`) was replayed chapter by
+chapter from an empty stack. Versions: Spark 4.3.0 (Connect) in a course image built
+from `docker/spark/Dockerfile` (`open-lakehouse-spark:4.3.0`): Iceberg Spark runtime
+built from apache/iceberg#18749 at commit `b1eab64f8d30`, hadoop-aws 3.5.0, AWS SDK
+bundle 2.56.0, analyticsaccelerator-s3 1.3.1, Python 3.12 in the image. Kafka
+connector 4.3.0 is the only `spark.jars.packages` entry. PySpark client 4.3.0 with
+`pandas<3`, Python 3.12. Unity Catalog v0.7.0, SeaweedFS 4.51, Airflow 3.3.2, MLflow
+3.1.0, DuckDB 1.5.6. Gold for 2026-01-05 is unchanged.
+
+Changes that came with it: deterministic Silver dedup (window, not `dropDuplicates`),
+`spark.sql.session.timeZone UTC` on the server, SDP storage on
+`s3a://lakehouse/_pipelines/medallion`, new DAGs paused at creation (Chapter 9
+unpauses), and Chapter 9's section on overlapping refreshes, built from
+`data/race.sh` and its log.
+
 ## Runtime verification, 2026-10-12
 
 The whole course was followed as a student, chapter by chapter, on a Linux host with
@@ -59,9 +76,13 @@ planned work, and each has an issue:
   `_file` column meanwhile.
 - **#7** Relax Chapter 7's "`select`, not `withColumn`" rule once a Spark release fixes
   SPARK-59663 (fix under review in apache/spark#59100). Reproduced on stock Spark
-  4.1.0, 4.1.3, 4.2.0 and main.
-- **#8** Move to Spark 4.2 once `iceberg-spark-runtime-4.2_2.13` is on Maven Central
-  (also recheck whether a newer MLflow image ships `boto3`; `v3.1.0` doesn't, so
-  Chapter 11 builds a two-line image).
+  4.1.0 through 4.3.0; the fix is not in v4.3.0.
+- **#8** Drop the Iceberg build stage in `docker/spark/Dockerfile` once
+  `iceberg-spark-runtime-4.3_2.13` is on Maven Central: it becomes one entry in
+  `spark.jars.packages`, and Chapter 4's Step 1a shrinks to match. (Also recheck
+  whether a newer MLflow image ships `boto3`; `v3.1.0` doesn't, so Chapter 11 builds
+  a two-line image.)
 - **#9** The companion code repository with a git tag per chapter, described as
   planned in `COURSE.md`.
+- **#10** Metric views on the Iceberg catalog: Unity Catalog 0.7.0's Iceberg REST
+  catalog has no view endpoints, so a metric view can't be stored there yet.

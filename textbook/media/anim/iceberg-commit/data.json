@@ -1,0 +1,102 @@
+{
+ "about": "Every value the iceberg-commit scene puts on screen, with where it came from.",
+ "verified": {
+  "date": "2026-11-06",
+  "stack": "Spark 4.3.0, Iceberg built from apache/iceberg#18749, Unity Catalog 0.7.0 (Iceberg REST endpoint)",
+  "where": "the course stack (open-lakehouse-dev), checked by hand on 2026-11-06 and reported in the brief for this animation",
+  "facts": [
+   "a commit is the catalog swapping the table's metadata-location from one metadata.json to the next; current-snapshot-id is a field inside the new metadata.json",
+   "a DELETE commits a new snapshot the same way",
+   "CALL system.rollback_to_snapshot makes an earlier snapshot current again with no data files rewritten",
+   "with write.wap.enabled=true on the table and spark.wap.branch set in the session, a write lands on the branch and main is untouched",
+   "an auditor reads the branch with VERSION AS OF '<branch>'",
+   "CALL system.fast_forward('ns.t', 'main', '<branch>') moves main to the branch's snapshot"
+  ]
+ },
+ "wap": {
+  "branch_delta_rows": 1,
+  "source": "on screen as 'main is unchanged' and '+1 row' on the branch. The verified check on the course stack (2026-11-06) had main stay at 5 rows while the branch had 6, i.e. main unchanged and the branch one row ahead. The absolute counts are not shown because the scene's snapshots S1..S3 are illustrative and carry no row counts.",
+  "verified_counts": {
+   "main_rows": 5,
+   "branch_rows": 6,
+   "shown_on_screen": false
+  },
+  "branch": "audit",
+  "branch_source": "illustrative name; the check used its own branch name"
+ },
+ "schematic": {
+  "note": "metadata version numbers (v1..v6), snapshot labels (S1..S4), and the number of manifests and data files per snapshot are illustrative, not read from a real table. The order of commits is the real one.",
+  "table": "ns.t",
+  "metadata": [
+   {
+    "v": "v1",
+    "current": "S1"
+   },
+   {
+    "v": "v2",
+    "current": "S2"
+   },
+   {
+    "v": "v3",
+    "current": "S3"
+   },
+   {
+    "v": "v4",
+    "current": "S2"
+   },
+   {
+    "v": "v5",
+    "current": "S2",
+    "audit": "S4"
+   },
+   {
+    "v": "v6",
+    "current": "S4",
+    "audit": "S4"
+   }
+  ],
+  "snapshots": [
+   {
+    "id": "S1",
+    "op": "INSERT",
+    "data_files": 2
+   },
+   {
+    "id": "S2",
+    "op": "INSERT",
+    "data_files": 2,
+    "reuses": [
+     "S1"
+    ]
+   },
+   {
+    "id": "S3",
+    "op": "DELETE",
+    "data_files": 0
+   },
+   {
+    "id": "S4",
+    "op": "INSERT on branch audit",
+    "data_files": 1,
+    "reuses": [
+     "S1",
+     "S2"
+    ]
+   }
+  ]
+ },
+ "timing": {
+  "note": "schematic timing, not measured",
+  "length": 39.5,
+  "beats": {
+   "open": 0.0,
+   "writes": 4.5,
+   "swap": 10.0,
+   "delete": 15.5,
+   "rollback": 19.0,
+   "wap": 24.0,
+   "audit": 30.0,
+   "publish": 33.5
+  }
+ }
+}

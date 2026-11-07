@@ -250,7 +250,7 @@ python -m lakehouse.ingest 2026-01-05    # run the exact same batch again
 
 Expected: the second run leaves the day's count at exactly `1020`. That's idempotency you can see, and because `ingest_orders` overwrites only the `2026-01-05` partition, running it ten more times still leaves 1020. This is worth doing deliberately once, because "the count didn't change when I ran it twice" is the most satisfying and concrete proof that your ingest is safe to retry. If you'd used a naive append, the count would have doubled to `2040`; try that too (in a scratch table) so you feel the difference.
 
-Now look at how Iceberg laid the Bronze table out, because the partitioning is physical. Unity Catalog places each table under a catalog-assigned prefix (as you saw in Chapter 5), so filter the listing for the partition folders:
+Now look at how Iceberg laid the Bronze table out. Unity Catalog places each table under a catalog-assigned prefix (as you saw in Chapter 5), so filter the listing for the partition folders:
 
 ```bash
 aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/warehouse/ | grep "_ingest_date="
@@ -258,7 +258,7 @@ aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/wareho
 # .../data/_ingest_date=2026-01-05/_source=orders-generator/00000-....parquet
 ```
 
-Notice the `_ingest_date=2026-01-05/_source=orders-generator/` folders in the path: that is `PARTITIONED BY (_ingest_date, _source)` made concrete. Each day and source lands under its own prefix, which is exactly why `overwritePartitions()` can replace one slice without touching another. And notice there are two Parquet files, one from each run. The second run didn't delete the first file; it wrote a new one and committed a snapshot that no longer references the old one. The old file stays in the bucket because the previous snapshot still points at it, which is the time-travel machinery from Chapter 5 at work. (Expiring old snapshots, a maintenance job, is what eventually deletes such files.)
+Notice the `_ingest_date=2026-01-05/_source=orders-generator/` folders in the path. They are Iceberg's default file naming, which writes each file's partition values into its path so a listing of the bucket shows them. The table doesn't depend on them. Iceberg records each data file's partition values (`_ingest_date`, `_source`) in that file's manifest entry, and that record is what `overwritePartitions()` matches when it picks the files to replace, and what a query filter on `_ingest_date` prunes against. Iceberg never parses a path to learn a partition, and its file naming is pluggable: some layouts leave the partition values out of the path entirely, and the overwrite still replaces exactly one slice. And notice there are two Parquet files, one from each run. The second run didn't delete the first file; it wrote a new one and committed a snapshot that no longer references the old one. The old file stays in the bucket because the previous snapshot still points at it, which is the time-travel machinery from Chapter 5 at work. (Expiring old snapshots, a maintenance job Chapter 9 schedules, is what eventually deletes such files.)
 
 Finally, look at the data itself, because Bronze should look exactly as messy as the source:
 
@@ -287,7 +287,7 @@ Expected (the first rows the query happens to return; yours may be a different f
 +--------+-----------+------+---------+-------------------+----------------+
 ```
 
-Uppercase statuses, a `-1.0` amount, `created_at` still a string: Bronze kept every wart, which is the point. Nothing is lost, so Chapter 7 can decide what "clean" means and change its mind later.
+Uppercase statuses, a `-1.0` amount, `created_at` still a string: Bronze kept every wart, which is the point. The `created_at` strings carry no offset; the generator writes them in UTC, and Silver will parse them as UTC because the Connect server's session time zone is UTC (Chapter 4). Nothing is lost, so Chapter 7 can decide what "clean" means and change its mind later.
 
 ## Batch now, streaming later
 
@@ -300,7 +300,7 @@ Batch is the right default for most ingestion and the easiest to reason about, p
 ## Troubleshooting
 
 - **`spark.read.json` fails with "Path does not exist" or reads nothing.** You ingested a date you never generated. Run `python -m lakehouse.generate <date>` for that date first, and list `s3://lakehouse/raw/orders/` to see which days exist.
-- **`ClassNotFoundException` for an S3A credentials provider, or `S3AFileSystem` not found.** The Connect server's `spark-defaults.conf` is wrong: `hadoop-aws` must match Spark's bundled Hadoop (3.4.2 for Spark 4.1.0) and the provider must be the AWS SDK v2 class from Chapter 4.
+- **`ClassNotFoundException` for an S3A credentials provider, or `S3AFileSystem` not found.** The Connect server's `spark-defaults.conf` is wrong: the provider must be the AWS SDK v2 class from Chapter 4. If you changed the Spark image, check that `/opt/spark/jars` still holds `hadoop-aws-3.5.0.jar`, matching the `hadoop-client-api-3.5.0.jar` Spark 4.3.0 ships (`docker compose exec spark-connect ls /opt/spark/jars | grep hadoop`).
 - **`Could not rename ... _temporary ...` when the generator writes.** Your object store mishandles the directory markers S3A uses during a commit. Use the SeaweedFS version pinned in Chapter 3; older releases have this bug.
 - **Row count doubles on the second run.** You're appending, not overwriting. Confirm you're using `.overwritePartitions()` (or a merge), not `INSERT INTO` or `.append()`.
 - **`CREATE TABLE` fails with a catalog error.** The Iceberg catalog isn't wired up or Unity Catalog OSS isn't running. Revisit Chapter 5: the catalog must be configured server-side and the service up before writes succeed.
