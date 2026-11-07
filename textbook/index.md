@@ -34,6 +34,7 @@ Read them in order. Each one builds a layer on top of the last.
 2. [Setup](chapters/ch02-setup.md): the environment, from scratch, with Docker Compose
 3. [Storage](chapters/ch03-storage.md): the object store and the open table format
 4. [Compute](chapters/ch04-compute.md): Spark, and why Spark Connect
+    - 4.5 [The Spark Image](chapters/ch04-5-spark-image.md): the course's own engine image, and why it's needed
 5. [Tables and Catalog](chapters/ch05-tables-catalog.md): Iceberg tables through Unity Catalog
 6. [Ingestion](chapters/ch06-ingestion.md): landing raw data into Bronze
 7. [Transformation](chapters/ch07-transformation.md): the medallion with Spark Declarative Pipelines

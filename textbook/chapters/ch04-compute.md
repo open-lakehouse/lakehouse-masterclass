@@ -58,7 +58,7 @@ Why does the isolation win matter so much in practice? In the classic model, a s
 But teach it honestly. Connect exposes the DataFrame, Spark SQL, and Structured Streaming surface, not the low-level driver internals:
 
 - **No RDD API and no `SparkContext`,** the biggest gap. Code that drops to `spark.sparkContext` or RDDs won't work. For a modern DataFrame and SQL lakehouse this rarely bites, but know it. (RDDs are the older, lower-level Spark API; DataFrames and SQL have been the recommended surface for years, so most modern code is unaffected.)
-- **UDF constraints.** Python and pandas UDFs work but serialize differently, and the server's Python workers must run the same Python minor version as your client (Step 1a sets this up).
+- **UDF constraints.** Python and pandas UDFs work but serialize differently, and the server's Python workers must run the same Python minor version as your client (Chapter 4.5 sets this up).
 - **Version-specific gaps.** Connect gained streaming and more of the ML API over releases, so verify features against the Spark version you run.
 - **Different debugging.** Errors arrive as `pyspark.errors.exceptions.connect.*`; the useful line is usually the last one.
 - **`CANNOT_MODIFY_STATIC_CONFIG`.** Static settings (SQL extensions, jars, the warehouse directory, the gRPC port) must be set server-side in the cluster's config, and a client session cannot inject them. We'll hit this in Chapter 5 when wiring the catalog.
@@ -80,8 +80,7 @@ services:
   # seaweedfs: ...  (from Chapter 3, unchanged)
 
   spark-master:
-    build: ./docker/spark
-    image: open-lakehouse-spark:4.3.0
+    image: apache/spark:4.3.0-scala2.13-java21-python3-ubuntu
     command: >
       bash -c "/opt/spark/sbin/start-master.sh --host 0.0.0.0 --port 7077 &&
                tail -f /opt/spark/logs/*"
@@ -91,8 +90,7 @@ services:
       - lakehouse-network
 
   spark-worker:
-    build: ./docker/spark
-    image: open-lakehouse-spark:4.3.0
+    image: apache/spark:4.3.0-scala2.13-java21-python3-ubuntu
     depends_on: [spark-master]
     env_file: .env
     environment:
@@ -106,8 +104,7 @@ services:
       - lakehouse-network
 
   spark-connect:
-    build: ./docker/spark
-    image: open-lakehouse-spark:4.3.0
+    image: apache/spark:4.3.0-scala2.13-java21-python3-ubuntu
     depends_on: [spark-master, spark-worker]
     env_file: .env
     environment:
@@ -127,105 +124,24 @@ services:
       - lakehouse-network
 ```
 
-Notice how this uses the exact concepts from Chapter 2. All three services run the same image, `open-lakehouse-spark:4.3.0`, which Compose builds from `./docker/spark` (Step 1a), so their versions match and the stack is reproducible. They all join the `lakehouse-network` you defined in Chapter 3, so the worker reaches the master by service name at `spark://spark-master:7077`, and the Connect server reaches the master the same way, no IP addresses, no `localhost`. Only two ports are published to your host: the master web UI on `8080` and the Connect gRPC endpoint on `15002`, because those are the two you reach from your laptop. The worker and the Connect server also get your SeaweedFS credentials as `AWS_*` environment variables (Compose fills them from `.env`), because they are the processes that actually read and write object storage. And the `spark-connect` service mounts your `spark-defaults.conf` into the container's config directory as a single file (not the whole `./config/spark` directory, which would hide the image's other config files such as logging), which is where the server-side static config lives, the config a thin client cannot set. You create that file in Step 1b.
+Notice how this uses the exact concepts from Chapter 2. All three services run the same official image, `apache/spark:4.3.0-scala2.13-java21-python3-ubuntu`, so their versions match and the stack is reproducible. They all join the `lakehouse-network` you defined in Chapter 3, so the worker reaches the master by service name at `spark://spark-master:7077`, and the Connect server reaches the master the same way, no IP addresses, no `localhost`. Only two ports are published to your host: the master web UI on `8080` and the Connect gRPC endpoint on `15002`, because those are the two you reach from your laptop. The worker and the Connect server also get your SeaweedFS credentials as `AWS_*` environment variables (Compose fills them from `.env`), because they are the processes that actually read and write object storage. And the `spark-connect` service mounts your `spark-defaults.conf` into the container's config directory as a single file (not the whole `./config/spark` directory, which would hide the image's other config files such as logging), which is where the server-side static config lives, the config a thin client cannot set. You create that file in Step 1a.
 
 By default the worker offers every core and nearly all the memory of your machine. On a laptop you can cap it by adding `SPARK_WORKER_CORES: "4"` and `SPARK_WORKER_MEMORY: "6g"` to the `spark-worker` service's `environment:`.
 
-Step 1a. Build the course's Spark image. The official `apache/spark:4.3.0` images lack two things this stack needs, so the course adds them in its own image. Create `docker/spark/Dockerfile`:
+The official image is all this chapter needs. Chapter 4.5 replaces it with the course's own image, for two things the next chapters ask of the cluster and the official image can't provide.
 
-```dockerfile
-# docker/spark/Dockerfile
-# The course's Spark image: Apache Spark 4.3.0 plus the two things the official
-# image lacks for this stack.
-#
-#  1. An Iceberg runtime for Spark 4.3. No Iceberg release ships one yet, so the
-#     first stage builds it from the pull request that adds Spark 4.3 support
-#     (apache/iceberg#18749), pinned to one commit. When a release ships
-#     iceberg-spark-runtime-4.3_2.13, this stage becomes one line in
-#     spark-defaults.conf (spark.jars.packages) and the stage goes away.
-#  2. Python 3.12 with pyarrow, pandas and protobuf. Python code that runs on
-#     the cluster (UDFs, and the stateful processor in Chapter 8) executes in a
-#     Python worker here, and Spark Connect requires that worker to run the same
-#     Python minor version as your client.
-
-# ---- stage 1: build the Iceberg runtime jar (several minutes, once) ----------
-FROM eclipse-temurin:17-jdk AS iceberg
-ARG ICEBERG_COMMIT=b1eab64f8d304344a22301084f841fa69a376d86
-RUN apt-get update && apt-get install -y --no-install-recommends git \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
-RUN git init -q . \
- && git fetch -q --depth 1 https://github.com/apache/iceberg.git "$ICEBERG_COMMIT" \
- && git checkout -q FETCH_HEAD
-RUN ./gradlew --no-daemon -q -x test \
-      -DsparkVersions=4.3 -DscalaVersion=2.13 -DflinkVersions= -DkafkaVersions= \
-      :iceberg-spark:iceberg-spark-runtime-4.3_2.13:shadowJar \
- && cp spark/v4.3/spark-runtime/build/libs/iceberg-spark-runtime-4.3_2.13-*.jar \
-       /iceberg-spark-runtime-4.3_2.13.jar
-# S3 access for both Iceberg (S3FileIO) and Hadoop's S3A filesystem (Spark
-# checkpoints, raw files). One AWS SDK for both, on Spark's own classpath:
-# when the two arrive through different classloaders, or as two SDK versions,
-# calls between them fail with NoClassDefFoundError or NoSuchMethodError.
-# hadoop-aws 3.5.0 matches the Hadoop that Spark 4.3.0 ships; SDK 2.56.0 is the
-# one this Iceberg commit builds against (2.x stays backward compatible).
-WORKDIR /jars
-RUN set -e; M=https://repo1.maven.org/maven2; \
-    curl -fsSLO $M/org/apache/hadoop/hadoop-aws/3.5.0/hadoop-aws-3.5.0.jar; \
-    curl -fsSLO $M/software/amazon/awssdk/bundle/2.56.0/bundle-2.56.0.jar; \
-    curl -fsSLO $M/software/amazon/s3/analyticsaccelerator/analyticsaccelerator-s3/1.3.1/analyticsaccelerator-s3-1.3.1.jar; \
-    printf '%s\n' \
-      "66bd9eefb938b1a1657487324b63c13df2d8b17164a1dd24e0ef37b905bc5baa  hadoop-aws-3.5.0.jar" \
-      "ae515d6745874faa1942aa47a2750d4ba333609db31457ac1e61f7fe91fc8985  bundle-2.56.0.jar" \
-      "4959a9747cbb479c73c3ffbcd479bee5b014f8b2880994585a8693fb9d24675e  analyticsaccelerator-s3-1.3.1.jar" \
-      | sha256sum -c -; \
-    cp /iceberg-spark-runtime-4.3_2.13.jar .
-
-# ---- stage 2: the image every Spark service runs --------------------------
-FROM apache/spark:4.3.0-scala2.13-java21-ubuntu
-USER root
-COPY --from=ghcr.io/astral-sh/uv:0.11.10 /uv /usr/local/bin/uv
-ENV UV_PYTHON_INSTALL_DIR=/opt/python
-RUN uv venv --python 3.12 /opt/venv \
- && uv pip install --python /opt/venv/bin/python --no-cache \
-      pyarrow==20.0.0 pandas==2.3.3 numpy==2.5.4 protobuf==6.33.6 \
-      grpcio==1.84.0 grpcio-status==1.84.0 googleapis-common-protos==1.75.5 \
-      zstandard==0.25.0
-# Spark starts its Python workers with this interpreter.
-ENV PYSPARK_PYTHON=/opt/venv/bin/python
-COPY --from=iceberg /jars/ /opt/spark/jars/
-USER spark
-```
-
-Each part is there for a reason you can name:
-
-- **Why not the official image as it is.** No Iceberg release ships a runtime for Spark 4.3 yet (`iceberg-spark-runtime-4.3_2.13`), so there is nothing to download. And the official image that carries Python, `apache/spark:4.3.0-scala2.13-java21-python3-ubuntu`, is Ubuntu 22.04 with Python 3.10 and no pyarrow or pandas, which does not match the Python 3.12 client you set up in Chapter 2.
-- **Stage 1 builds the Iceberg runtime.** It starts from a JDK 17 image, fetches one pinned commit of [apache/iceberg#18749](https://github.com/apache/iceberg/pull/18749), the pull request that adds Spark 4.3 support, and runs Gradle for just the Spark 4.3, Scala 2.13 runtime jar, skipping the tests and the Flink and Kafka Connect modules. Pinning the commit means everyone builds the same jar. This stage is temporary: when an Iceberg release includes the 4.3 runtime, it becomes one entry in `spark.jars.packages` and the stage goes away.
-- **The S3 jars, with checksums.** `hadoop-aws` is the S3A connector behind every `s3a://` path (Spark checkpoints, raw files), and it must match the Hadoop that Spark ships: Spark 4.3.0 includes `hadoop-client-api-3.5.0.jar`, so this is `hadoop-aws` 3.5.0. `analyticsaccelerator-s3` 1.3.1 is a library `hadoop-aws` 3.5.0 depends on. `bundle-2.56.0.jar` is the AWS SDK v2, which both S3A and Iceberg's own S3 client (`S3FileIO`) call. The `sha256sum -c` line stops the build if any download differs from the file the course was verified with.
-- **One AWS SDK, on Spark's own classpath.** All of these jars land in `/opt/spark/jars`, next to Spark's own, instead of being fetched at startup through `spark.jars.packages`. Two arrangements that look reasonable both fail. With the Iceberg runtime in the image but `iceberg-aws-bundle` (Iceberg's copy of the SDK) in `spark.jars.packages`, the first table access fails with `Cannot initialize FileIO implementation org.apache.iceberg.aws.s3.S3FileIO` caused by `NoClassDefFoundError: software/amazon/awssdk/core/exception/SdkException`: packages are loaded by a child classloader, and classes on Spark's classpath can't see into it. With `iceberg-aws-bundle` in the image and `hadoop-aws` in `spark.jars.packages`, the packages bring SDK 2.35.4 (the version `hadoop-aws` 3.5.0 was built against) next to Iceberg's newer one, and a streaming query that checkpoints RocksDB state over S3A fails with a `NoSuchMethodError` on `software.amazon.awssdk.utils.Logger.logger()`. One SDK version, loaded once by the same classloader as everything that calls it, avoids both. The bundle is 2.56.0 because that's the version this Iceberg commit builds against, and SDK 2.x releases stay backward compatible for the S3A code built against 2.35.4.
-- **Stage 2 is the image every Spark service runs.** It starts from the official image without Python, `apache/spark:4.3.0-scala2.13-java21-ubuntu`, copies in `uv` (a Python installer), and uses it to create a Python 3.12 virtual environment at `/opt/venv` with pinned pyarrow, pandas, protobuf and gRPC packages. `PYSPARK_PYTHON` tells Spark to start its Python workers with that interpreter. This is the cluster side of the version rule from Chapter 2: Python UDFs and Chapter 8's stateful processor run in these workers, and PySpark refuses to run them unless the worker's Python minor version equals your client's.
-- **`USER root`, then `USER spark`.** Installing needs root; the last line switches back to the unprivileged `spark` user the official image runs as.
-
-Build it once now:
-
-```bash
-docker compose build spark-connect
-docker image ls open-lakehouse-spark
-```
-
-The first build takes several minutes, almost all of it Gradle compiling Iceberg; later builds reuse the cached layers and finish in seconds. All three services name the same `image:`, so this one build serves the master and the worker too, and `docker compose up` uses the tagged image instead of building it again. If you edit the Dockerfile later, rebuild with `docker compose build spark-connect` and recreate the three services with `docker compose up -d`.
-
-Step 1b. Create the Connect server's static config. Because a thin client cannot change static settings on a running Connect server (the `CANNOT_MODIFY_STATIC_CONFIG` rule from earlier), the settings every later chapter needs have to be in place at server start. Create `config/spark/spark-defaults.conf`:
+Step 1a. Create the Connect server's static config. Because a thin client cannot change static settings on a running Connect server (the `CANNOT_MODIFY_STATIC_CONFIG` rule from earlier), the settings every later chapter needs have to be in place at server start. Create `config/spark/spark-defaults.conf`:
 
 ```properties
 # config/spark/spark-defaults.conf  (read by the Connect server at startup)
 
-# The Kafka connector (Chapter 8). Iceberg, S3A and the AWS SDK are baked into
-# the image instead (docker/spark/Dockerfile).
-spark.jars.packages      org.apache.spark:spark-sql-kafka-0-10_2.13:4.3.0
+# Jars the Connect server fetches at startup: Hadoop's S3A connector (for every
+# s3a:// path; it must match the Hadoop that Spark ships) and the Kafka
+# connector (Chapter 8).
+spark.jars.packages      org.apache.hadoop:hadoop-aws:3.5.0,org.apache.spark:spark-sql-kafka-0-10_2.13:4.3.0
 # The image runs as user "spark" whose HOME is /nonexistent, so point Ivy (the
 # jar downloader) at a writable directory or the server dies at startup.
 spark.jars.ivy           /tmp/.ivy2
-spark.sql.extensions     org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
 # Every timestamp without an offset is read and bucketed as UTC, whatever the
 # server's or your laptop's clock says. Without this, to_date() near midnight
 # depends on the machine the job ran on.
@@ -235,20 +151,16 @@ spark.sql.session.timeZone  UTC
 spark.hadoop.fs.s3a.endpoint                  http://seaweedfs:8333
 spark.hadoop.fs.s3a.path.style.access         true
 spark.hadoop.fs.s3a.aws.credentials.provider  software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider
-
-# Iceberg's S3FileIO and the AWS SDK v2 both require a region, even against
-# SeaweedFS; it is supplied by the AWS_REGION env var on the Spark services.
-spark.sql.catalog.iceberg.s3.region           us-east-1
 ```
 
-You will add the catalog's own lines to this same file in Chapter 5. For now it loads the Iceberg SQL extensions, fetches the Kafka connector for Chapter 8, fixes the session time zone, and tells Spark how to reach SeaweedFS, so the first time you create a table (next chapter) the engine is already wired for it. Four lines in it are the kind of detail that costs an afternoon when it's wrong, so here is what each one is protecting you from:
+Chapter 4.5 adjusts this file for the course's image, and Chapter 5 adds the catalog's lines. For now it fetches two connectors, fixes the session time zone, and tells Spark how to reach SeaweedFS, so the first `s3a://` path you use (Chapter 6) already works. Four lines in it are the kind of detail that costs an afternoon when it's wrong, so here is what each one is protecting you from:
 
-- **`spark.jars.packages` holds only the Kafka connector.** `spark-sql-kafka-0-10_2.13:4.3.0` must match the Spark version exactly, and unlike the S3 jars it calls no AWS code, so fetching it at startup is safe. Everything that touches the AWS SDK is already in the image (Step 1a).
+- **`spark.jars.packages` fetches two connectors at startup.** `hadoop-aws` is Hadoop's S3A connector, the code behind every `s3a://` path, and it must match the Hadoop that Spark ships: Spark 4.3.0 includes `hadoop-client-api-3.5.0.jar`, so this is `hadoop-aws` 3.5.0, and Ivy fetches the AWS SDK it was built against along with it. `spark-sql-kafka-0-10_2.13:4.3.0` must match the Spark version exactly. (Chapter 4.5 moves `hadoop-aws` into the image, and explains why it can't stay here once Iceberg arrives.)
 - **`spark.jars.ivy /tmp/.ivy2`.** `spark.jars.packages` is resolved by Ivy, which downloads jars into a cache under the user's home directory. The official image runs Spark as the user `spark`, whose home is `/nonexistent`. Without this line the Connect server dies at startup with `java.io.FileNotFoundException: /nonexistent/.ivy2.5.2/cache/resolved-org.apache.spark-spark-submit-parent-....xml (No such file or directory)`, and `docker compose ps` shows it exiting.
 - **`spark.sql.session.timeZone UTC`.** The order timestamps you ingest in Chapter 6 are strings with no offset, like `2026-01-05T23:30:00`, and the source means them as UTC. Spark parses an offset-less string in the session time zone, which without this line is the default time zone of the server's JVM, so the instant stored in Silver would depend on how the machine running Spark is configured: on a server set to `America/Los_Angeles`, that string becomes 07:30 UTC on January 6. `to_date()`, which buckets orders into days in Chapter 7, also uses the session time zone, so a session in another zone counts orders near midnight toward a different day. Setting UTC here, on the server, makes it the default for every session, including the ones Airflow opens in Chapter 9.
 - **The credentials provider.** The S3A connector is built on AWS SDK v2, so the class that reads `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` from the environment is the SDK's own `software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider`. The older name you'll find in many blog posts, `org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider`, does not exist in Hadoop 3.4 or later and fails the first `s3a://` read with `ClassNotFoundException`.
 
-Because the Ivy cache lives in `/tmp` inside the container, the Connect server downloads the Kafka connector every time the container is created (a `restart` keeps it; a `down`/`up` or a config change that recreates the container fetches it again). That makes the first start after a recreate a little slower; it's normal.
+Because the Ivy cache lives in `/tmp` inside the container, the Connect server downloads both connectors every time the container is created (a `restart` keeps it; a `down`/`up` or a config change that recreates the container fetches it again). That makes the first start after a recreate a little slower; it's normal.
 
 Step 2. Bring the new services up:
 
@@ -267,7 +179,7 @@ open-lakehouse-spark-master-1    spark-master    Up 40 seconds   0.0.0.0:8080->8
 open-lakehouse-spark-worker-1    spark-worker    Up 38 seconds
 ```
 
-Compose uses the `open-lakehouse-spark:4.3.0` image you built in Step 1a, so nothing is pulled for Spark. "Up" for `spark-connect` only means the container started; the gRPC endpoint is ready once its log says so. Wait for that line rather than guessing:
+The first `up` pulls the official Spark image, once. "Up" for `spark-connect` only means the container started; the gRPC endpoint is ready once its log says so. Wait for that line rather than guessing:
 
 ```bash
 until docker compose logs spark-connect | grep -q "Spark Connect server started"; do sleep 3; done
@@ -275,7 +187,7 @@ docker compose logs spark-connect | grep "Spark Connect server started"
 # ... INFO SparkConnectServer: Spark Connect server started at: [::]:15002
 ```
 
-If the container keeps exiting instead, `docker compose logs spark-connect` will almost always show one of the three problems explained under Step 1b. The worker publishes no host port on purpose: nothing on your laptop talks to it directly, only the master and Connect server do, over the network, by service name.
+If the container keeps exiting instead, `docker compose logs spark-connect` will almost always show one of the three problems explained under Step 1a. The worker publishes no host port on purpose: nothing on your laptop talks to it directly, only the master and Connect server do, over the network, by service name.
 
 **What just happened?** You started three related things: a Spark master (the coordinator that hands out work), a worker (the process that actually runs tasks), and the Connect server (the gRPC endpoint your thin client will talk to). The master and worker are the "kitchen," and the Connect server is the "waiter" taking your orders. All three run in containers on the same network as your storage, so in later chapters Spark will reach the object store at `seaweedfs:8333` by service name.
 
@@ -405,22 +317,18 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 
 ## Troubleshooting
 
-- **Client hangs or "connection refused" on `sc://localhost:15002`.** The Connect server isn't up yet, or is still starting. Run `docker compose ps` to confirm `spark-connect` is running, and `docker compose logs spark-connect` to see why if it isn't. After any recreate it first downloads the Kafka connector listed in `spark.jars.packages`; wait for `Spark Connect server started` in its log.
-- **`spark-connect` exits immediately with `FileNotFoundException: /nonexistent/.ivy2...`.** The `spark.jars.ivy /tmp/.ivy2` line is missing from `spark-defaults.conf`, or the file isn't mounted (check the `volumes:` path). See Step 1b.
-- **`docker compose build spark-connect` fails in stage 1.** The Iceberg build needs network access to GitHub and Maven Central, and room on the disk Docker uses; a `sha256sum: WARNING: ... computed checksum did NOT match` line means a jar download was cut short or changed. Re-run the build; Docker resumes from the last cached layer.
-- **`Cannot initialize FileIO implementation org.apache.iceberg.aws.s3.S3FileIO` with `NoClassDefFoundError: software/amazon/awssdk/core/exception/SdkException`** (on the first table access, in Chapter 5). The AWS SDK reached Spark through `spark.jars.packages` (for example `iceberg-aws-bundle`) while the Iceberg runtime sits on Spark's own classpath; packages load in a child classloader the runtime can't see. Keep `spark.jars.packages` to the Kafka connector and use the image's jars (Step 1a).
-- **`NoSuchMethodError` on `software.amazon.awssdk.utils.Logger.logger()`** (in Chapter 8, when a stateful stream checkpoints over S3A). Two AWS SDK versions are on the classpath, typically because `hadoop-aws` was added to `spark.jars.packages` and brought SDK 2.35.4 next to the image's 2.56.0. Remove it; the image already has `hadoop-aws` 3.5.0.
+- **Client hangs or "connection refused" on `sc://localhost:15002`.** The Connect server isn't up yet, or is still starting. Run `docker compose ps` to confirm `spark-connect` is running, and `docker compose logs spark-connect` to see why if it isn't. After any recreate it first downloads the connectors listed in `spark.jars.packages`; wait for `Spark Connect server started` in its log.
+- **`spark-connect` exits immediately with `FileNotFoundException: /nonexistent/.ivy2...`.** The `spark.jars.ivy /tmp/.ivy2` line is missing from `spark-defaults.conf`, or the file isn't mounted (check the `volumes:` path). See Step 1a.
 - **`PySparkImportError: [PACKAGE_NOT_INSTALLED] Pandas >= 2.2.0 must be installed`.** You installed bare `pyspark` instead of `pyspark[connect]`, or you're outside the project's virtual environment. Activate `.venv` and run `pip install -e .` again.
-- **`ClassNotFoundException: org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider`** (it surfaces in Chapter 6, on the first `s3a://` access). Your config still names the Hadoop 3.3-era provider; use the AWS SDK v2 class shown in Step 1b and restart `spark-connect`.
+- **`ClassNotFoundException: org.apache.hadoop.fs.s3a.auth.EnvironmentVariableCredentialsProvider`** (it surfaces in Chapter 6, on the first `s3a://` access). Your config still names the Hadoop 3.3-era provider; use the AWS SDK v2 class shown in Step 1a and restart `spark-connect`.
 - **`pyspark.errors.exceptions.connect.*` traceback.** That's a Connect-style error; the last line is usually the real message. Read it before scrolling up through the gRPC noise.
 - **Code fails with something about `sparkContext` or RDDs.** You're using an API Connect doesn't expose. Rewrite it in DataFrame or SQL terms; there's almost always a direct equivalent.
 - **`CANNOT_MODIFY_STATIC_CONFIG`.** You tried to set a static config from the client. It has to be set server-side, in the mounted `spark-defaults.conf`; you'll see how in Chapter 5.
-- **`[PYTHON_VERSION_MISMATCH] Python in worker has different version: 3.10 than that in driver: 3.12`** (or another pair of versions) when a UDF runs. The server's Python workers and your client run different Python minor versions. The course image runs Python 3.12 (`PYSPARK_PYTHON=/opt/venv/bin/python`); recreate your `.venv` with `python3.12` (Chapter 2), and check that the Spark services run `open-lakehouse-spark:4.3.0`, not an official image (`docker compose images`).
+- **`[PYTHON_VERSION_MISMATCH] Python in worker has different version: 3.10 than that in driver: 3.12`** when a Python UDF runs. Expected on the official image, whose workers run Python 3.10: Chapter 4.5 builds the image that fixes it.
 - **The worker doesn't register with the master.** Check `docker compose logs spark-worker`. The usual cause is the master wasn't ready yet; `depends_on` starts it first, but if the worker raced ahead, `docker compose restart spark-worker` fixes it.
 
 ## Checkpoint
 
-- `docker image ls open-lakehouse-spark` lists the `4.3.0` image you built.
 - `docker compose ps` shows `spark-master`, `spark-worker`, and `spark-connect` running alongside `seaweedfs`, and the Connect log says `Spark Connect server started`.
 - The Spark UI at `localhost:8080` shows a registered worker.
 - Your Python client connected via `sc://localhost:15002` and `spark.range(5).show()` returned five rows.
@@ -447,10 +355,10 @@ Spark Declarative Pipelines (`pyspark.pipelines`), which we use to build the med
 - Spark is **lazy**: transformations build a plan, actions run it.
 - You drive it with **Spark Connect**, a thin client over `sc://`, for portability, isolation, and thin dependencies, accepting the DataFrame and SQL surface in exchange.
 - Static config lives **server-side**, in the mounted `spark-defaults.conf`; remember `CANNOT_MODIFY_STATIC_CONFIG`. The session time zone is set there to UTC, so a timestamp's day doesn't depend on the machine.
-- The Spark services run the **course's own image**: Spark 4.3.0, an Iceberg runtime built from a pinned commit, one AWS SDK on Spark's own classpath, and Python 3.12 to match your client.
+- The Spark services run the **official Spark 4.3.0 image** for now, with the S3A and Kafka connectors fetched at startup.
 - You wrote the first module of your `lakehouse` package, `config.py` and `session.py`, so every later chapter opens its session with `from lakehouse.session import get_spark`, not re-pasted boilerplate.
-- **Next, Chapter 5, Tables and Catalog:** create real Iceberg tables through Unity Catalog OSS, evolve their schema, and travel through their snapshots.
+- **Next, Chapter 4.5, The Spark Image:** see what the official image can't do for the rest of the course, and build the image that can.
 
 ![Progress: Compute complete, Tables next](../figures/ch04/fig-4.5-progress-compute-done.svg)
 
-**Figure 4.5**. Progress map with **Compute** done and **Tables and Catalog** next.
+**Figure 4.5**. Progress map with **Compute** done and **Tables and Catalog** next (after the Chapter 4.5 interlude).

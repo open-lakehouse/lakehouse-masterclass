@@ -43,7 +43,7 @@ Start here → **[textbook/README.md](textbook/README.md)**, then read **[textbo
 
 ## 🗺️ The curriculum
 
-You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters, ten layers of the stack (Chapters 3 to 12), one working system.
+You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters plus a short interlude (Chapter 4.5, the Spark image), ten layers of the stack (Chapters 3 to 12), one working system.
 
 | # | Chapter | The layer you build | The payoff |
 |---|---------|--------------------|------------|
@@ -51,6 +51,7 @@ You build the lakehouse **bottom-up**, because you can't transform data before y
 | 2 | **Setup** | Your environment, from scratch | Install the tools, lay out the project, and learn the container, networking, and secrets model the whole stack runs on. |
 | 3 | **Storage** | Object store + open table format | Stand up your first real service (SeaweedFS), and learn how loose Parquet files become a *table*. Meet Iceberg. |
 | 4 | **Compute** | Apache Spark, via **Spark Connect** | Drive a real Spark cluster from a tiny client over `sc://`, no heavyweight driver bolted to your app. |
+| 4.5 | **The Spark Image** | The course's own Spark image | Build an engine image the way platform teams do: an Iceberg runtime built from a pinned commit, one AWS SDK, and Python that matches your client. |
 | 5 | **Tables & Catalog** | Iceberg through **Unity Catalog OSS** | Create a real transactional table, evolve its schema, then *time-travel* and roll back a mistake. ✨ |
 | 6 | **Ingestion** | Landing raw data → **Bronze** | Load data the modern way (ELT), and make it safely re-runnable so retries never duplicate rows. |
 | 7 | **Transformation** | The **medallion** with Spark Declarative Pipelines | Declare Bronze→Silver→Gold and let the engine figure out the order, the refresh, and the quality checks. |

@@ -11,6 +11,7 @@ on top of the previous one. Diagrams live in `figures/chNN/`.
 | 2 | Setup | `chapters/ch02-setup.md` | ✅ drafted |
 | 3 | Storage | `chapters/ch03-storage.md` | ✅ drafted |
 | 4 | Compute (Spark Connect) | `chapters/ch04-compute.md` | ✅ drafted |
+| 4.5 | The Spark Image (interlude) | `chapters/ch04-5-spark-image.md` | ✅ drafted |
 | 5 | Tables & Catalog (Iceberg + Unity Catalog OSS) | `chapters/ch05-tables-catalog.md` | ✅ drafted |
 | 6 | Ingestion | `chapters/ch06-ingestion.md` | ✅ drafted |
 | 7 | Transformation (Spark Declarative Pipelines) | `chapters/ch07-transformation.md` | ✅ drafted |
