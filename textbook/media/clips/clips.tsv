@@ -1,0 +1,7 @@
+clip	source	start	end	poster_at	chapter
+iceberg-commit	anim/iceberg-commit-paper-landscape.mp4	0	39.5	12	ch05
+stateful-sessions	anim/stateful-sessions-paper-landscape.mp4	0	39	25	ch08
+sessions-state-store	film/sessions-crash-landscape.mp4	37.00	60.92	22	ch08
+sessions-crash-restart	film/sessions-crash-landscape.mp4	60.92	101.12	39	ch08
+refresh-race	film/refresh-race-landscape.mp4	25.04	59.40	33	ch09
+refresh-race-commits	film/refresh-race-landscape.mp4	59.40	94.04	33	ch09

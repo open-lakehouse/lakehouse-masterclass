@@ -12,10 +12,13 @@ edit_uri: edit/main/textbook/
 
 docs_dir: textbook
 
-# Keep the GitHub repo README and the figure generator out of the built site.
+# Keep the GitHub repo README, the figure generator and the clip tooling out of the built site.
 exclude_docs: |
   README.md
   figures/_tools/
+  media/clips/out/
+  media/clips/cut.sh
+  media/clips/clips.tsv
 
 theme:
   name: material

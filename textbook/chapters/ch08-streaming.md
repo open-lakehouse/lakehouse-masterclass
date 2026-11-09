@@ -409,7 +409,12 @@ The pieces you'll use:
 
 The processor runs in Python workers on the Spark cluster, not in your client, which is why the course's image (Chapter 4) installs Python 3.12 and pyarrow next to Spark: the workers need the same Python minor version as your client.
 
-<!-- animation: textbook/media/anim/stateful-sessions (renders delivered separately) -->
+<figure markdown="span">
+  <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/stateful-sessions.webp">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/stateful-sessions.mp4" type="video/mp4">
+  </video>
+  <figcaption>The processor below, step by step: each order updates the visit, its map entry and the timer; a re-sent order lands on the same map key; the visit closes when the watermark passes its timer. The 15-second gap and 10-second watermark are the code's; event times and amounts are schematic.</figcaption>
+</figure>
 
 **Step 7: write the processor and its query.** Add `lakehouse/customer_sessions.py`:
 
@@ -625,6 +630,14 @@ spark.read.format("statestore").option("readRegisteredTimers", "true").load(cp).
 
 These are the visits still open: `c-17`'s visit started at `1794004712091` and its latest order was at `1794004727620`, its map holds the orders so far, and its timer is set for `1794004727620 + 15000 = 1794004742620`. When the watermark passes that, `handleExpiredTimer` fires and these rows become one row in Gold.
 
+<figure markdown="span">
+  <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/sessions-state-store.webp">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/sessions-state-store.mp4" type="video/mp4">
+  </video>
+  <figcaption>Step 9 on a filmed run: the state data source reading the open visits, their order maps and their registered timers while the query runs. The keys and timestamps differ from the output above because it's a different run.</figcaption>
+</figure>
+
+
 **Step 10: crash it, and check nothing was lost or doubled.** Ctrl-C is a polite stop. A crash is the real test: restart the Connect server while the query runs, which takes the driver and its state store with it.
 
 ```bash
@@ -646,6 +659,14 @@ spark.sql("""
 ```
 
 No visit was written twice, and none was lost: the restarted query restored each customer's open visit, map and timer from the checkpoint at the last committed micro-batch, re-ran from those Kafka offsets, and Iceberg skipped any epoch it had already committed. On the run behind these numbers, all 166 visits matched a recomputation straight from the Kafka topic, order counts, revenue and cancellations, across the crash. The same check is the second exercise below.
+
+<figure markdown="span">
+  <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/sessions-crash-restart.webp">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/sessions-crash-restart.mp4" type="video/mp4">
+  </video>
+  <figcaption>Step 10 on a filmed run: restart the Connect server under the query, start the job again with the same command, and a minute later rows equal visits (298 on this run).</figcaption>
+</figure>
+
 
 ### Real-time Mode, briefly
 
