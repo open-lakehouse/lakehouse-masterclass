@@ -2,7 +2,7 @@
 # Off camera, before every take of sessions-crash.tape: reset the sessions table and its
 # checkpoint the way data/replay-ch8.sh does, then build the three tmux panes the tape
 # types into (producer, customer_sessions, query) on their own tmux server (-L film2).
-#   film-setup.sh landscape|vertical
+#   film-setup.sh landscape|vertical|chapter
 set -euo pipefail
 FMT=${1:-landscape}
 D=${FILM_DEMO:?set FILM_DEMO to a checkout of the finished course project}
@@ -30,6 +30,12 @@ if [[ $FMT == vertical ]]; then
     $T new-session -d -s film -x 62 -y 52 -c "$D" "zsh -f"
     $T split-window -v -t film:0.0 -l 35 -c "$D" "zsh -f"
     $T split-window -v -t film:0.0 -l 9 -c "$D" "zsh -f"
+elif [[ $FMT == chapter ]]; then
+    # 95x24 cells (1280x720 at 20px, for the textbook's embedded clips): a wider query pane,
+    # since the producer pane is only there to show that events are flowing.
+    $T new-session -d -s film -x 95 -y 24 -c "$D" "zsh -f"
+    $T split-window -h -t film:0.0 -l 60 -c "$D" "zsh -f"
+    $T split-window -v -t film:0.0 -c "$D" "zsh -f"
 else
     # 131x34 cells: producer over job on the left, query on the right.
     $T new-session -d -s film -x 131 -y 34 -c "$D" "zsh -f"
