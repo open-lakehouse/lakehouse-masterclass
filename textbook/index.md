@@ -30,20 +30,21 @@ Everything runs locally in containers, and everything is open source, so the ski
 
 Read them in order. Each one builds a layer on top of the last.
 
-1. [Foundations](chapters/ch01-foundations.md) — the decisions that are expensive to get wrong
-2. [Setup](chapters/ch02-setup.md) — the environment, from scratch, with Docker Compose
-3. [Storage](chapters/ch03-storage.md) — the object store and the open table format
-4. [Compute](chapters/ch04-compute.md) — Spark, and why Spark Connect
-5. [Tables and Catalog](chapters/ch05-tables-catalog.md) — Iceberg tables through Unity Catalog
-6. [Ingestion](chapters/ch06-ingestion.md) — landing raw data into Bronze
-7. [Transformation](chapters/ch07-transformation.md) — the medallion with Spark Declarative Pipelines
-8. [Streaming](chapters/ch08-streaming.md) — Kafka into the same tables
-9. [Orchestration](chapters/ch09-orchestration.md) — scheduling the pipeline with Airflow
-10. [Serving](chapters/ch10-serving.md) — one catalog, many engines
-11. [AI](chapters/ch11-ai.md) — training and tracking a model on the lakehouse
-12. [Agents](chapters/ch12-agents.md) — an agent that operates the stack
-13. [Deploy and Teardown](chapters/ch13-deploy-teardown.md) — where to go next
+1. [Foundations](chapters/ch01-foundations.md): the decisions that are expensive to get wrong
+2. [Setup](chapters/ch02-setup.md): the environment, from scratch, with Docker Compose
+3. [Storage](chapters/ch03-storage.md): the object store and the open table format
+4. [Compute](chapters/ch04-compute.md): Spark, and why Spark Connect
+    - 4.5 [Iceberg for Spark 4.3](chapters/ch04-5-iceberg-runtime.md): the Iceberg runtime, built from source until it's released
+5. [Tables and Catalog](chapters/ch05-tables-catalog.md): Iceberg tables through Unity Catalog
+6. [Ingestion](chapters/ch06-ingestion.md): landing raw data into Bronze
+7. [Transformation](chapters/ch07-transformation.md): the medallion with Spark Declarative Pipelines
+8. [Streaming](chapters/ch08-streaming.md): Kafka into the same tables, and per-customer state with transformWithState
+9. [Orchestration](chapters/ch09-orchestration.md): scheduling the pipeline with Airflow
+10. [Serving](chapters/ch10-serving.md): one catalog, many engines
+11. [AI](chapters/ch11-ai.md): training and tracking a model on the lakehouse
+12. [Agents](chapters/ch12-agents.md): an agent that operates the stack
+13. [Deploy and Teardown](chapters/ch13-deploy-teardown.md): where to go next
 
 ---
 
-The full source, including the figure files and the finished code, lives in the [GitHub repository](https://github.com/open-lakehouse/lakehouse-masterclass).
+The full source, including the figure files, lives in the [GitHub repository](https://github.com/open-lakehouse/lakehouse-masterclass). Every chapter shows its code in full; a companion code repository with a tag per chapter is planned ([issue #9](https://github.com/open-lakehouse/lakehouse-masterclass/issues/9)).

@@ -1,0 +1,7 @@
+renders/
+media/
+__pycache__/
+.work/
+theme.css
+theme.js
+theme.json

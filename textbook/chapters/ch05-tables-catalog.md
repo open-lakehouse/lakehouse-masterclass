@@ -18,6 +18,7 @@ By the end of this chapter you'll be able to:
 - Read an Iceberg table's internal structure (its snapshots, its data files, its `metadata.json`) straight from the catalog, from Spark, and from the bucket.
 - Evolve a table's schema (add, rename, drop, reorder columns) without rewriting data, and explain why that is cheap.
 - Use snapshots to time-travel: query an older version, then roll a table back to undo a bad write.
+- Name snapshots with tags, and stage a write on a branch so it is audited before readers see it (write-audit-publish).
 - Diagnose the most common catalog and table errors you'll actually hit.
 
 ## The problem a catalog solves
@@ -44,7 +45,7 @@ That's the difference between a swamp and a database. The files hold the data; t
 
 ![Catalog: names to metadata to files](../figures/ch05/fig-5.2-catalog-role.svg)
 
-**Figure 5.2**. The catalog sits between engines and storage: a client asks the catalog for `iceberg.bronze.orders`, gets back the current metadata pointer, and then reads the data files directly from object storage. The catalog brokers where to look; the engine still does the actual reading.
+**Figure 5.2**. The catalog sits between engines and storage: a client asks the catalog for `iceberg.bronze.orders`, gets back the location of its current `metadata.json`, and then reads the data files directly from object storage. The catalog brokers where to look; the engine still does the actual reading.
 
 ### A quick note on naming: catalog, namespace, table
 
@@ -85,6 +86,8 @@ The catalog wiring (the Iceberg SQL extensions, the REST catalog URI, the wareho
 
 ```properties
 # add to config/spark/spark-defaults.conf (the file you started in Chapter 4)
+# Iceberg's SQL extensions: CALL procedures, branch and tag DDL, MERGE rewrites.
+spark.sql.extensions                           = org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
 spark.sql.catalog.iceberg                      = org.apache.iceberg.spark.SparkCatalog
 spark.sql.catalog.iceberg.type                 = rest
 spark.sql.catalog.iceberg.uri                  = http://unity-catalog:8080/api/2.1/unity-catalog/iceberg
@@ -95,15 +98,20 @@ spark.sql.catalog.iceberg.io-impl              = org.apache.iceberg.aws.s3.S3Fil
 spark.sql.catalog.iceberg.s3.endpoint          = http://seaweedfs:8333
 spark.sql.catalog.iceberg.s3.path-style-access = true
 spark.sql.catalog.iceberg.client.refresh-credentials-enabled = false
+# Iceberg's S3FileIO and the AWS SDK v2 both require a region, even against
+# SeaweedFS; it is supplied by the AWS_REGION env var on the Spark services.
+spark.sql.catalog.iceberg.s3.region            = us-east-1
 ```
 
-Read it top to bottom. The first four lines say "there is a catalog called `iceberg`, it speaks the REST protocol, it lives at this URL, and inside Unity Catalog it's the catalog named `iceberg`." Note the URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is a Unity Catalog catalog name, not an object-storage path.
+Read it top to bottom. The first setting, `spark.sql.extensions`, loads `IcebergSparkSessionExtensions` from the runtime you added in Chapter 4.5. It adds Iceberg's SQL to Spark: the `CALL` procedures (the rollback later in this chapter, the maintenance in Chapter 9), the branch and tag statements, and the rewrites behind `MERGE` on Iceberg tables. Extensions are a static setting, read once when the server starts, so this is exactly the kind of line that has to live here. The next four lines say "there is a catalog called `iceberg`, it speaks the REST protocol, it lives at this URL, and inside Unity Catalog it's the catalog named `iceberg`." Note the URI uses the in-network address `unity-catalog:8080` (the service name and container port from the Compose file), not `localhost:8081`, because the Connect server reaches the catalog over the Compose network. The `warehouse` is a Unity Catalog catalog name, not an object-storage path.
 
 The next three lines are about bytes. When Spark writes a table, it writes the Parquet data files and the manifests itself, straight to SeaweedFS, through Iceberg's own S3 client (`S3FileIO`). That client needs the same endpoint and path-style addressing you set for Hadoop's S3A client in Chapter 4; it doesn't read the `fs.s3a.*` settings.
 
-The last line needs a word of explanation, because without it every write fails. When Spark loads a table, Unity Catalog hands back short-term storage credentials for it ("credential vending") along with an address where the client can come back for fresh ones. Our local setup has no real token service, so Unity Catalog vends the static keys from its config, with no expiry time. Iceberg sees a refresh address, looks for the expiry, finds none, and gives up with `Invalid S3 Credentials: s3.session-token-expires-at-ms not set`. Turning off credential refresh tells Iceberg to simply use the keys it was given. Against real S3 with a token service, you would leave refresh on.
+The `refresh-credentials-enabled` line needs a word of explanation, because without it every write fails. When Spark loads a table, Unity Catalog hands back short-term storage credentials for it ("credential vending") along with an address where the client can come back for fresh ones. Our local setup has no real token service, so Unity Catalog vends the static keys from its config, with no expiry time. Iceberg sees a refresh address, looks for the expiry, finds none, and gives up with `Invalid S3 Credentials: s3.session-token-expires-at-ms not set`. Turning off credential refresh tells Iceberg to simply use the keys it was given. Against real S3 with a token service, you would leave refresh on.
 
-Who writes what, then? Spark writes the data files, the manifests, and every later `metadata.json`. Unity Catalog writes the very first `metadata.json` when a table is created, and records each commit (the pointer swap) after that. That's why Unity Catalog also needs a route to SeaweedFS, which you'll give it in a moment.
+The last line gives Iceberg's S3 client a region. The AWS SDK refuses to work without one, even against SeaweedFS, which ignores it; the Spark services also get it as `AWS_REGION`.
+
+Who writes what, then? Spark writes the data files, the manifests, and the manifest lists. Unity Catalog writes every `metadata.json`: the first one when a table is created, and a new one at every commit. That follows from how the Iceberg REST protocol commits. The client doesn't send a file; it sends the catalog a list of requirements ("the table's `main` branch is still at snapshot X") and a list of updates ("add this snapshot, point `main` at it"), and the catalog answers with the new table metadata and the location of the file that holds it. Unity Catalog 0.7.0 checks the requirements against the current `metadata.json`, applies the updates, writes the result as the next `metadata.json`, and then swaps the table's metadata location to that file in its database, refusing the swap if another commit got there first. That's why Unity Catalog also needs a route to SeaweedFS, which you'll give it in a moment.
 
 Why is all this server-side config good news rather than a limitation? Because it means your client code is gloriously boring. You connect over `sc://` and just write `spark.sql("CREATE TABLE ...")`, and the catalog is already wired, already authenticated, already pointed at the right storage. The platform owns the plumbing; you write logic. Every engineer who connects gets the same correct wiring for free, and nobody can accidentally point their session at the wrong catalog. Thin clients, central configuration: that's the Spark Connect philosophy from Chapter 4 doing real work.
 
@@ -260,7 +268,7 @@ Expected:
 +---------+
 ```
 
-**What just happened?** Even before you inserted a single row, a `metadata.json` describing the table's schema was written to object storage, and the catalog recorded a pointer to it. This first metadata file is the one Unity Catalog writes itself, which is why it needed `AWS_ENDPOINT_URL_S3`. Note what it did *not* write: a snapshot. A snapshot records a specific set of data files, and a freshly created table has had no data operation yet, so it has none. The catalog now knows `iceberg.bronze.orders` exists, what shape it has, and where its metadata lives. The table is real; it just has no data, and no snapshots, yet.
+**What just happened?** Even before you inserted a single row, a `metadata.json` describing the table's schema was written to object storage, and the catalog recorded its location. Unity Catalog wrote that file itself (as it will every later one), which is why it needed `AWS_ENDPOINT_URL_S3`. Note what it did *not* write: a snapshot. A snapshot records a specific set of data files, and a freshly created table has had no data operation yet, so it has none. The catalog now knows `iceberg.bronze.orders` exists, what shape it has, and where its metadata lives. The table is real; it just has no data, and no snapshots, yet.
 
 **Step 3: insert a few rows and read them back:**
 
@@ -287,7 +295,7 @@ Expected output:
 +--------+-----------+------+---------+-------------------+
 ```
 
-**What just happened?** That `INSERT` did not edit an existing file. Spark wrote new Parquet data files and a manifest straight to SeaweedFS, then wrote a new `metadata.json` declaring a fresh snapshot whose file list includes them, and asked Unity Catalog to move the table's pointer to it. The catalog's pointer moved atomically. This is the ACID guarantee in action: until that pointer flips, no reader sees the half-written state; the instant it flips, every reader sees the complete new version. There is never an in-between.
+**What just happened?** That `INSERT` did not edit an existing file. Spark wrote new Parquet data files, a manifest listing them, and a manifest list for a new snapshot straight to SeaweedFS, then sent Unity Catalog a commit: add this snapshot and make it current, provided `main` is still at the snapshot the write started from (here, none). Unity Catalog checked that, wrote a new `metadata.json` whose `current-snapshot-id` field names the new snapshot, and swapped the table's metadata location from the old file to the new one in a single database transaction. That swap is the ACID guarantee in action: until it happens, every reader loads the old `metadata.json` and sees the old table; from then on, every reader loads the new one and sees the complete new version. There is never an in-between.
 
 **Step 4: verify the catalog knows the table, independent of Spark.** Ask the Iceberg REST endpoint directly, with no Spark involved, to list the tables in the `bronze` namespace, under the `catalogs/iceberg` prefix the `config` call returned:
 
@@ -324,7 +332,7 @@ An Iceberg table is **not** the data files alone. It's a small tree of metadata 
 
 The key insight: data files are immutable, and a write never edits them. A write adds new data files and a new snapshot that references the right set. Old snapshots keep pointing at the old file sets, untouched. That one design choice is what buys you three features at once:
 
-- **ACID**: a write is "done" only when the current-snapshot pointer atomically flips. Readers always see one consistent snapshot.
+- **ACID**: a write is "done" only when the catalog atomically swaps the table's metadata location to the new `metadata.json`, which names the new current snapshot. Readers always load one `metadata.json`, so they always see one consistent snapshot.
 - **Concurrent safety**: two writers producing new files and new snapshots don't stomp each other's data files.
 - **Time travel**: old snapshots still exist and still point at valid files, so you can read the table "as of" any of them.
 
@@ -429,6 +437,21 @@ Expected (your ids, times, and paths differ):
 
 One snapshot so far, your insert, recorded as an `append`. (The `CREATE TABLE` itself made no snapshot: snapshots record data operations, and the empty create had none.) And three data files, not one: Spark split the three `VALUES` rows across three tasks, and each task wrote its own Parquet file. On real data you'd see far fewer, far larger files; the point is that a "table" is whatever set of files the current snapshot lists. `_file` is one of the hidden metadata columns every Iceberg table carries (`DESCRIBE TABLE EXTENDED` lists them), and it works no matter which catalog you use.
 
+The same history is one `curl` away from a shell, which is the quickest way to see snapshots while the metadata tables are blocked ([course issue #6](https://github.com/open-lakehouse/lakehouse-masterclass/issues/6)). `jq` pulls one line per snapshot out of the `metadata.snapshots` array in the `loadTable` response:
+
+```bash
+curl -s http://localhost:8081/api/2.1/unity-catalog/iceberg/v1/catalogs/iceberg/namespaces/bronze/tables/orders \
+  | jq -r '.metadata.snapshots[] | [."snapshot-id", (."timestamp-ms" / 1000 | todate), .summary.operation, .summary."total-records"] | @tsv'
+```
+
+Expected (your id and time differ):
+
+```
+5582016758237887382	2026-01-05T09:44:28Z	append	3
+```
+
+Without `jq`, pipe the response to `python3 -m json.tool` and read the `snapshots` array by eye; `print_snapshots` is the same read in Python.
+
 ### Now go look at the actual files in the bucket
 
 The catalog's metadata is Iceberg describing itself. For the version that makes it click, open the bucket and look at the real objects. Find the table's location first:
@@ -451,7 +474,7 @@ Expected (trimmed; the long ids differ on your machine):
 .../tables/<table-id>/data/00001-1-12a34173-...-00001.parquet
 .../tables/<table-id>/data/00002-2-12a34173-...-00001.parquet
 .../tables/<table-id>/metadata/00000-cc63e3aa-....metadata.json     # written by Unity Catalog at CREATE
-.../tables/<table-id>/metadata/00001-c0f4745b-....metadata.json     # written by Spark at INSERT
+.../tables/<table-id>/metadata/00001-c0f4745b-....metadata.json     # written by Unity Catalog at the INSERT's commit
 .../tables/<table-id>/metadata/snap-5582016758237887382-1-....avro  # the manifest list for your snapshot
 .../tables/<table-id>/metadata/11597205-...-m0.avro                 # the manifest (lists the data files)
 ```
@@ -485,7 +508,7 @@ print_snapshots("bronze", "orders")
 aws --endpoint-url http://localhost:8333 s3 ls --recursive s3://lakehouse/warehouse/ | grep "/metadata/"
 ```
 
-Expected: a second snapshot (`append +1 total=4`, now marked current), and in the bucket a **new** `metadata.json` (`00002-...`), a **new** `snap-....avro` manifest list, and a new manifest, while the old ones are still present, untouched. That single observation is the entire design: a write never edits old files, it writes new metadata and flips the catalog's pointer to it. Both snapshots' manifest lists now sit side by side in the bucket, which is why time travel (next-but-one section) is possible at all: the old snapshot's files were never removed.
+Expected: a second snapshot (`append +1 total=4`, now marked current), and in the bucket a **new** `metadata.json` (`00002-...`), a **new** `snap-....avro` manifest list, and a new manifest, while the old ones are still present, untouched. That single observation is the entire design: a write never edits old files; it adds new ones, and the commit swaps the catalog's metadata location to the new `metadata.json`. Both snapshots' manifest lists now sit side by side in the bucket, which is why time travel (next-but-one section) is possible at all: the old snapshot's files were never removed.
 
 > **These exact object names are illustrative** (version numbers, UUIDs, and the catalog-assigned ids depend on your run). The shape, `data/` Parquet plus a `metadata/` tree of `metadata.json` + `snap-*.avro` + `*-m0.avro`, is what to confirm.
 
@@ -606,7 +629,7 @@ before.count()                                # 5: your rows are still here, unt
 spark.sql(f"SELECT count(*) FROM iceberg.bronze.orders VERSION AS OF {good}").show()
 ```
 
-(If you've seen older Iceberg examples use `.option("snapshot-id", ...)`: that option was removed. On this stack it fails with `Time travel option snapshot-id is no longer supported, use Spark built-in versionAsOf instead`.)
+(If you've seen older Iceberg examples use `.option("snapshot-id", ...)`: Iceberg's modules for Spark 4.1 and later removed that option. On this stack it fails with ``IllegalArgumentException: Time travel option `snapshot-id` is no longer supported, use Spark built-in `versionAsOf` instead``.)
 
 **Roll back** to make that good snapshot current again:
 
@@ -638,12 +661,115 @@ print_snapshots("bronze", "orders")
    8627029015067133546  2026-01-05 09:47:08  delete    +0     total=0
 ```
 
-The `delete` snapshot is still in the history; it just isn't current anymore. The rollback itself is just another metadata operation: flip the current pointer back to the good snapshot. Instant, cheap, and complete. Nothing was copied, restored, or rewritten.
+The `delete` snapshot is still in the history; it just isn't current anymore. The rollback itself is just another commit: Unity Catalog writes a new `metadata.json` whose `current-snapshot-id` is the good snapshot again and swaps the table's metadata location to it. Instant, cheap, and complete. Nothing was copied, restored, or rewritten.
 
 This is the "wow" of the lakehouse, and it's worth pausing on *why* it's possible:
 warehouse-grade safety (undo a destructive write in seconds) sitting on warehouse-cheap storage (immutable files in an object store). You are not paying for an expensive proprietary system to get this; it falls out of the open table format's design.
 
-> **A note on retention:** snapshots don't live forever by default in production. You expire old ones to reclaim storage (a maintenance job you'll meet in the "where to go next" roadmap). Time travel works within your retention window. For this course, nothing is expired, so all your snapshots are available.
+> **A note on retention:** snapshots stay listed in the table's metadata, and their files stay in the bucket, until something expires them, and nothing on this stack does that on its own. The job that does it is Iceberg's `expire_snapshots` procedure. By default it removes snapshots older than five days (the table property `history.expire.max-snapshot-age-ms`) while always keeping the most recent snapshot of each branch (`history.expire.min-snapshots-to-keep`), it never removes a snapshot that a branch or tag still points at, and it deletes the data and manifest files that only the expired snapshots referenced. Time travel works for whatever survives. Chapter 9 schedules that job; until then nothing is expired, so all your snapshots are available. To keep a particular snapshot through any expiry, give it a name.
+
+## Tags and branches: named snapshots
+
+A snapshot id is a number nobody remembers, and a snapshot that only an id points at is fair game for `expire_snapshots`. Iceberg lets you name snapshots instead. Both kinds of name live in the `refs` map of `metadata.json`: a **tag** is a fixed name for one snapshot, and a **branch** is a name that moves forward as commits land on it. `main`, the history you've been writing all chapter, is itself a branch.
+
+> **Tag / branch** *(canonical term)*: a named reference to a snapshot, stored in the table's metadata. A tag never moves; a branch advances with each commit written to it.
+
+**Tag the known-good snapshot**, keep it for 30 days, and read it back by name:
+
+```python
+spark.sql(f"ALTER TABLE iceberg.bronze.orders CREATE TAG known_good AS OF VERSION {good} RETAIN 30 DAYS")
+spark.sql("SELECT count(*) FROM iceberg.bronze.orders VERSION AS OF 'known_good'").show()
+```
+
+Expected:
+
+```
++--------+
+|count(1)|
++--------+
+|       5|
++--------+
+```
+
+`VERSION AS OF` takes either a snapshot id (a number) or a ref name (a string, in quotes). `RETAIN 30 DAYS` becomes the tag's `max-ref-age-ms`, and the age is counted from the snapshot's commit time, not from when you created the tag. Until that age passes, `expire_snapshots` keeps the tag and the snapshot it points at; leave `RETAIN` off and the tag (and its snapshot) is kept indefinitely, unless the table sets `history.expire.max-ref-age-ms`. Chapter 11 tags each model's training snapshot this way, so the data behind a model survives Chapter 9's expiry.
+
+Iceberg would normally show refs in a `.refs` metadata table, which fails on Unity Catalog 0.7.0 for the reason explained earlier ([course issue #6](https://github.com/open-lakehouse/lakehouse-masterclass/issues/6)). The catalog's `loadTable` response has them, so ask it:
+
+```bash
+curl -s http://localhost:8081/api/2.1/unity-catalog/iceberg/v1/catalogs/iceberg/namespaces/bronze/tables/orders \
+  | jq '.metadata.refs'
+```
+
+Expected (your ids differ):
+
+```json
+{
+  "main": {
+    "snapshot-id": 7404065150051679918,
+    "type": "branch"
+  },
+  "known_good": {
+    "snapshot-id": 7404065150051679918,
+    "type": "tag",
+    "max-ref-age-ms": 2592000000
+  }
+}
+```
+
+### Write, audit, publish: staging a write on a branch
+
+The rollback above fixes a bad write after readers have seen it. Write-audit-publish (WAP) keeps them from seeing it at all: the write lands on a branch, a check reads the branch, and only then does `main` move to it. Turn WAP on for the table, create a branch for the day's load, and point this session's writes at it:
+
+```python
+spark.sql("ALTER TABLE iceberg.bronze.orders SET TBLPROPERTIES ('write.wap.enabled' = 'true')")
+spark.sql("ALTER TABLE iceberg.bronze.orders CREATE BRANCH audit_0106")
+
+spark.conf.set("spark.wap.branch", "audit_0106")    # this session's writes now commit to the branch
+spark.sql("INSERT INTO iceberg.bronze.orders VALUES "
+          "('o-2001', 'c-4', 25.00, 'placed', TIMESTAMP '2026-01-06 08:00:00', 'web')")
+spark.conf.unset("spark.wap.branch")                 # back to normal before reading anything
+
+spark.table("iceberg.bronze.orders").count()         # 5: main hasn't moved
+```
+
+The `INSERT` committed a snapshot to `audit_0106`, and `main` still points at the known-good snapshot, so every reader of `iceberg.bronze.orders` still sees 5 rows. Now audit the branch the way a separate check would, from a second session: open another terminal, start `python`, and read the branch by name:
+
+```python
+from lakehouse.session import get_spark
+auditor = get_spark()
+auditor.sql("SELECT count(*) FROM iceberg.bronze.orders VERSION AS OF 'audit_0106'").show()   # 6
+auditor.table("iceberg.bronze.orders").count()                                               # 5
+```
+
+Six rows on the branch, five on `main`. If the audit fails, drop the branch (`ALTER TABLE iceberg.bronze.orders DROP BRANCH audit_0106`) and `main` never saw the write. If it passes, publish by fast-forwarding `main` to the branch:
+
+```python
+spark.sql("CALL iceberg.system.fast_forward('bronze.orders', 'main', 'audit_0106')").show()
+spark.table("iceberg.bronze.orders").count()         # 6
+```
+
+Expected (your ids differ; `updated_ref` here is from a verification run):
+
+```
++--------------+-------------------+-------------------+
+|branch_updated|       previous_ref|        updated_ref|
++--------------+-------------------+-------------------+
+|          main|7404065150051679918|7699130844656220191|
++--------------+-------------------+-------------------+
+```
+
+`previous_ref` is the known-good snapshot `main` pointed at; `updated_ref` is the snapshot your `INSERT` committed to `audit_0106`.
+
+Publishing wrote no data: it was one more commit, setting `main` to the snapshot the branch already had. Readers went from 5 rows to 6 in a single metadata swap, with the audited snapshot and nothing else.
+
+Iceberg has shorter ways to say "the branch" that don't work on Unity Catalog 0.7.0. Reading `iceberg.bronze.orders.branch_audit_0106`, reading with `.option("branch", "audit_0106")`, and reading anything in a session that still has `spark.wap.branch` set all fail the same way, with the error from the metadata-table lookup:
+
+```
+pyspark.errors.exceptions.connect.UnknownException:
+  (org.apache.iceberg.exceptions.NoSuchNamespaceException) Schema not found: iceberg.bronze.orders
+```
+
+Each of them makes Spark ask the catalog for a name under `bronze.orders`, and Unity Catalog 0.7.0 answers "no such namespace." That is why the steps above unset `spark.wap.branch` right after the write and read the branch with `VERSION AS OF '<branch>'`, which works. The fix is the same Unity Catalog change as the metadata tables ([course issue #6](https://github.com/open-lakehouse/lakehouse-masterclass/issues/6)).
 
 ## Common pitfalls and troubleshooting
 
@@ -659,7 +785,9 @@ Real learning includes the errors. Here are the ones you're most likely to hit i
 
 - **`Schema not found: iceberg.bronze.orders`** when you query `...orders.snapshots`, `.files`, or `.history`. That's the Unity Catalog 0.7.0 metadata-table limitation explained above (fixed in the next release), not a mistake on your part. Use `lakehouse.catalog.print_snapshots`, `SHOW TBLPROPERTIES`, and the `_file` column instead.
 
-- **`Time travel option snapshot-id is no longer supported, use Spark built-in versionAsOf instead`.** Use `.option("versionAsOf", id)` or `VERSION AS OF id`.
+- **``Time travel option `snapshot-id` is no longer supported, use Spark built-in `versionAsOf` instead``.** Iceberg's Spark 4.1+ modules dropped the option. Use `.option("versionAsOf", id)` or `VERSION AS OF id`.
+
+- **`Schema not found: iceberg.bronze.orders` when you read a branch.** You used `iceberg.bronze.orders.branch_<name>`, `.option("branch", ...)`, or read in a session that still has `spark.wap.branch` set. On Unity Catalog 0.7.0 only `VERSION AS OF '<branch>'` works; unset `spark.wap.branch` after the write ([course issue #6](https://github.com/open-lakehouse/lakehouse-masterclass/issues/6)).
 
 - **Your catalog or tables vanished after a restart** (`NoSuchWarehouseException: Catalog not found: iceberg`). Unity Catalog's database wasn't on a volume, so recreating the container reset it. Add the `uc-db` volume from Step 1, recreate the catalog, and recreate your tables. The old files are still in the bucket, but nothing points at them now.
 
@@ -719,6 +847,7 @@ Don't just read, extend the build. Each of these reinforces something from the c
 - A catalog maps table names to metadata and files so any engine can find them consistently, answering what tables exist, what's the current schema and snapshot, and where the files are.
 - Unity Catalog OSS is our one catalog for everything, exposing a standard Iceberg REST endpoint that many engines share, the basis of Chapter 10's multi-engine serving. Its own records live on the `uc-db` volume, because a catalog is state.
 - An Iceberg table is a metadata tree over immutable data files. That design gives you ACID, concurrent-writer safety, cheap schema evolution, and time travel and rollback, all as metadata operations.
+- Tags name a snapshot so expiry keeps it; branches stage a write so it can be audited, then published to `main` with `fast_forward`.
 - You can read that tree straight from the catalog (`lakehouse/catalog.py`), from Spark (`SHOW TBLPROPERTIES`, the `_file` column), and from the bucket itself.
 - Static catalog wiring lives server-side; your thin client just uses it.
 - **Next, Chapter 6, Ingestion:** now that you can create and trust tables, you'll land raw order data into the Bronze layer and meet the ingestion patterns that keep it correct: batch, ELT, and idempotency.

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en" data-resolution="portrait">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1080, height=1920" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="theme.css" />
+    <script src="theme.js"></script>
+    <script src="spark.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: var(--a-w); height: var(--a-h); overflow: hidden; background: var(--a-bg); }
+    </style>
+  </head>
+  <body>
+    <!-- `anim render` rewrites data-width/data-height per format; leave them as they are. -->
+    <div id="main" data-composition-id="main" data-start="0" data-duration="39.5" data-width="1080" data-height="1920">
+      <div id="stage"></div>
+    </div>
+    <script>
+      // Storyboard: storyboard.md. Every value on screen comes from data.json.
+      const D = (() => { const r = new XMLHttpRequest(); r.open("GET", "data.json", false); r.send(); return JSON.parse(r.responseText); })();
+      const B = D.timing.beats, M = D.schematic.metadata, S = D.schematic.snapshots, W = D.wap, TBL = D.schematic.table;
+      A.mount();
+      const K = A.T.sans === A.T.mono ? 0.82 : 1;        // ide sets everything in a monospace face: long lines shrink to fit
+      const titled = (t, s) => { A.title(t); A.text(s, { y: 0.075 + A.dy(A.portrait ? 96 : 84), size: 34 * K, weight: 400, color: "var(--a-mute)" }); };
+
+      // ---------------------------------------------------------------- layout (fractions of the usable frame)
+      const Y = { cat: 0.255, meta: 0.42, snap: 0.575, man: 0.685, data: 0.77, sql: 0.855, cap: 0.905 };
+      const MX = M.map((_, i) => 0.125 + 0.15 * i);           // metadata files, left to right
+      const SX = [0.2, 0.4, 0.6, 0.8];                         // snapshot columns
+      const SZ = { cat: [640, 120], meta: [146, 104], snap: [190, 100], man: [150, 52], data: [78, 38] };
+      const hide = (els) => gsap.set([].concat(els), { opacity: 0 });
+      const show = (els, t) => A.tl.set([].concat(els), { opacity: 1 }, t);
+      const gone = (els, t) => A.tl.set([].concat(els), { opacity: 0 }, t);
+      const pulse = (el, t) => { A.tl.set(el, { scale: 1.08 }, t); A.tl.to(el, { scale: 1, duration: 0.45, ease: "power2.out" }, t); };
+
+      // ---------------------------------------------------------------- beat open (0.0): on screen at frame 0, no fade
+      titled("Iceberg commits", "one atomic swap of one pointer, in the catalog");
+
+      // the catalog: Unity Catalog's Iceberg REST endpoint, holding metadata-location
+      A.box({ x: 0.5, y: Y.cat, w: SZ.cat[0], h: SZ.cat[1], kind: "ink" });
+      A.text("Unity Catalog · Iceberg REST", { y: Y.cat - A.dy(24), size: 28 * K, weight: 600, color: A.T.box.ink.title });
+      const ptr = M.map((m) => A.text(`metadata-location → ${m.v}.metadata.json`, { y: Y.cat + A.dy(24), size: 24 * K, mono: true, color: A.T.box.ink.title }));
+      hide(ptr.slice(1));
+
+      // catalog -> metadata file, one arrow per possible target
+      const catTop = Y.cat + A.dy(SZ.cat[1] / 2), metaTop = Y.meta - A.dy(SZ.meta[1] / 2), metaBot = Y.meta + A.dy(SZ.meta[1] / 2);
+      const catLine = MX.map((x) => A.line({ x1: 0.5, y1: catTop, x2: x, y2: metaTop - A.dy(6), color: "var(--a-ink)", width: 4 }));
+      const catHead = MX.map((x) => A.dot({ x, y: metaTop - A.dy(6), r: 8, color: "var(--a-ink)", hidden: false }));
+      hide([...catLine.slice(1), ...catHead.slice(1)]);
+
+      // metadata files: a paper card per version, plus a soft overlay while it is the current one
+      const metaSub = (m) => `current ${m.current}` + (m.audit ? `<br>audit ${m.audit}` : "");
+      const meta = M.map((m, i) => A.box({ x: MX[i], y: Y.meta, w: SZ.meta[0], h: SZ.meta[1], kind: "paper", title: `${m.v}.json`, sub: metaSub(m), size: 26 }));
+      const metaCur = M.map((m, i) => A.box({ x: MX[i], y: Y.meta, w: SZ.meta[0], h: SZ.meta[1], kind: "soft", title: `${m.v}.json`, sub: metaSub(m), size: 26 }));
+      hide([...meta.slice(1), ...metaCur.slice(1)]);
+
+      // snapshots (each one a manifest list), manifests, data files
+      const sIdx = Object.fromEntries(S.map((s, j) => [s.id, j]));
+      const snapTop = Y.snap - A.dy(SZ.snap[1] / 2), snapBot = Y.snap + A.dy(SZ.snap[1] / 2);
+      const manTop = Y.man - A.dy(SZ.man[1] / 2), manBot = Y.man + A.dy(SZ.man[1] / 2), dataTop = Y.data - A.dy(SZ.data[1] / 2);
+      const col = S.map((s, j) => {
+        const branch = s.id === "S4";
+        const c = {};
+        c.box = A.box({ x: SX[j], y: Y.snap, w: SZ.snap[0], h: SZ.snap[1], kind: branch ? "ok" : "paper", title: s.id, sub: branch ? `manifest list<br>branch ${W.branch}` : "manifest list", size: 28 });
+        c.cur = A.box({ x: SX[j], y: Y.snap, w: SZ.snap[0], h: SZ.snap[1], kind: "accent", title: s.id, sub: branch ? `manifest list<br>branch ${W.branch}` : "manifest list", size: 28 });
+        c.man = A.box({ x: SX[j], y: Y.man, w: SZ.man[0], h: SZ.man[1], kind: "ghost", title: "manifest", size: 22 });
+        c.links = [A.line({ x1: SX[j], y1: snapBot, x2: SX[j], y2: manTop })];
+        for (const r of s.reuses || []) c.links.push(A.line({ x1: SX[j], y1: snapBot, x2: SX[sIdx[r]], y2: manTop, width: 2 }));
+        c.files = [];
+        const n = s.data_files;
+        for (let k = 0; k < n; k++) {
+          const x = SX[j] + (n === 1 ? 0 : (k - (n - 1) / 2) * A.dx(88));
+          c.files.push(A.line({ x1: SX[j], y1: manBot, x2: x, y2: dataTop }));
+          c.files.push(A.box({ x, y: Y.data, w: SZ.data[0], h: SZ.data[1], kind: "paper", title: "parquet", size: 17, radius: 6 }));
+        }
+        hide(c.cur);
+        if (j > 0) hide([c.box, c.man, ...c.links, ...c.files]);
+        return c;
+      });
+
+      // current metadata file -> the snapshots it names (main in ink, the audit ref in green)
+      const metaLink = M.map((m, i) => {
+        const L = [A.line({ x1: MX[i], y1: metaBot, x2: SX[sIdx[m.current]], y2: snapTop, color: "var(--a-ink)", width: 3 })];
+        if (m.audit && m.audit !== m.current) L.push(A.line({ x1: MX[i], y1: metaBot, x2: SX[sIdx[m.audit]], y2: snapTop, color: "var(--a-ok)", width: 3 }));
+        if (i > 0) hide(L);
+        return L;
+      });
+      show(col[0].cur, 0);
+
+      // captions: SQL (mono) and a plain line; one element per beat, swapped
+      const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+      const sqlText = (s) => A.text(esc(s), { y: Y.sql, size: 24 * K, mono: true, color: "var(--a-acc)" });
+      const capText = (s) => A.text(s, { y: Y.cap, size: 30 * K, weight: 500 });
+      let curCap = capText("the catalog holds one pointer: metadata-location"), curSql = null, curSqlStr = "";
+      function caption(t, cap, sql) {
+        const c = capText(cap); hide(c);
+        A.out(curCap, t - 0.3, { dur: 0.3 }); A.in(c, t); curCap = c;
+        if (sql === curSqlStr) return;  // same statement still running: leave it on screen
+        if (curSql) A.out(curSql, t - 0.3, { dur: 0.3 });
+        curSql = null; curSqlStr = sql || "";
+        if (sql) { const q = sqlText(sql); hide(q); A.in(q, t); curSql = q; }
+      }
+
+      // a commit: the catalog's metadata-location moves from version a to version b, in one step
+      let cur = 0;
+      function swap(b, t) {
+        const a = cur;
+        gone([ptr[a], catLine[a], catHead[a], metaCur[a], ...metaLink[a]], t);
+        show([ptr[b], catLine[b], catHead[b], metaCur[b], ...metaLink[b]], t);
+        const was = M[a].current, now = M[b].current;
+        if (was !== now) { gone(col[sIdx[was]].cur, t); show(col[sIdx[now]].cur, t); }
+        pulse(ptr[b], t); pulse(metaCur[b], t);
+        cur = b;
+      }
+      const write = (els, t, o = {}) => A.in(els, t, { stagger: 0.12, ...o });
+
+      // ---------------------------------------------------------------- beat writes (4.5)
+      caption(B.writes, "new files are written; readers still see v1", `INSERT INTO iceberg.${TBL} VALUES (…)`);
+      write(col[1].files, B.writes + 0.5);
+      write([...col[1].links, col[1].man], B.writes + 1.2);
+      write(col[1].box, B.writes + 1.8);
+      write(meta[1], B.writes + 2.6);
+
+      // ---------------------------------------------------------------- beat swap (10.0)
+      caption(B.swap, "the catalog swaps metadata-location: v1 → v2", `INSERT INTO iceberg.${TBL} VALUES (…)`);
+      swap(1, B.swap + 0.4);
+
+      // ---------------------------------------------------------------- beat delete (15.5)
+      caption(B.delete, "DELETE commits S3 the same way", `DELETE FROM iceberg.${TBL} WHERE …`);
+      write([...col[2].links, col[2].man], B.delete + 0.3);
+      write(col[2].box, B.delete + 0.7);
+      write(meta[2], B.delete + 1.1);
+      swap(2, B.delete + 2.0);
+
+      // ---------------------------------------------------------------- beat rollback (19.0)
+      caption(B.rollback, "no data rewritten: v4's current-snapshot-id is S2 again", `CALL iceberg.system.rollback_to_snapshot('${TBL}', <S2 id>)`);
+      write(meta[3], B.rollback + 0.6);
+      swap(3, B.rollback + 1.6);
+
+      // ---------------------------------------------------------------- beat wap (24.0)
+      caption(B.wap, `the write lands on branch ${W.branch}; main is unchanged`, `write.wap.enabled=true   spark.wap.branch=${W.branch}`);
+      write(col[3].files, B.wap + 0.6);
+      write([...col[3].links, col[3].man], B.wap + 1.1);
+      write(col[3].box, B.wap + 1.6);
+      write(meta[4], B.wap + 2.2);
+      swap(4, B.wap + 3.0);
+
+      // ---------------------------------------------------------------- beat audit (30.0)
+      caption(B.audit, `auditor reads branch ${W.branch}: +${W.branch_delta_rows} row`, `SELECT * FROM iceberg.${TBL} VERSION AS OF '${W.branch}'`);
+      pulse(col[3].box, B.audit + 0.4);
+
+      // ---------------------------------------------------------------- beat publish (33.5)
+      caption(B.publish, "fast_forward moves main to S4: another swap", `CALL iceberg.system.fast_forward('${TBL}', 'main', '${W.branch}')`);
+      write(meta[5], B.publish + 0.6);
+      swap(5, B.publish + 1.6);
+
+      const note = A.note(`schematic timing; behaviour verified on the course stack ${D.verified.date}`);
+      gsap.set(note, { fontSize: A.px(26 * K) });
+      A.in(note, 0.5);
+      A.finish(D.timing.length);
+    </script>
+  </body>
+</html>

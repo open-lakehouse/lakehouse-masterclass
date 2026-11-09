@@ -36,8 +36,8 @@
 
   <!-- skills side note -->
   <rect x="900" y="235" width="300" height="90" rx="12" fill="#1e293b" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="5 4"/>
-  <text x="1050" y="268" fill="#ddd6fe" font-size="15" font-weight="700" text-anchor="middle">Skills (.claude/skills)</text>
-  <text x="1050" y="292" fill="#c4b5fd" font-size="12" text-anchor="middle">documented procedures</text>
+  <text x="1050" y="268" fill="#ddd6fe" font-size="15" font-weight="700" text-anchor="middle">AGENTS.md + Makefile</text>
+  <text x="1050" y="292" fill="#c4b5fd" font-size="12" text-anchor="middle">interfaces and guardrails</text>
   <text x="1050" y="311" fill="#c4b5fd" font-size="12" text-anchor="middle">tell the agent HOW</text>
 
   <text x="640" y="620" fill="#94a3b8" font-size="16" text-anchor="middle">A chatbot answers; an agent acts: planning, calling tools, observing, and adapting until the goal is met.</text>

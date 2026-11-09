@@ -43,14 +43,15 @@ Start here → **[textbook/README.md](textbook/README.md)**, then read **[textbo
 
 ## 🗺️ The curriculum
 
-You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters, twelve layers, one working system.
+You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters plus a short, temporary Chapter 4.5 (the Iceberg runtime for Spark 4.3), ten layers of the stack (Chapters 3 to 12), one working system.
 
 | # | Chapter | The layer you build | The payoff |
 |---|---------|--------------------|------------|
 | 1 | **Foundations** | *(the map)* | Understand what a lakehouse is, and make the handful of architecture decisions that are expensive to get wrong before you write any code. |
 | 2 | **Setup** | Your environment, from scratch | Install the tools, lay out the project, and learn the container, networking, and secrets model the whole stack runs on. |
 | 3 | **Storage** | Object store + open table format | Stand up your first real service (SeaweedFS), and learn how loose Parquet files become a *table*. Meet Iceberg. |
-| 4 | **Compute** | Apache Spark, via **Spark Connect** | Drive a real Spark cluster from a tiny client over `sc://`, no heavyweight driver bolted to your app. |
+| 4 | **Compute** | Apache Spark, via **Spark Connect** | Build the course's Spark image and drive a real Spark cluster from a tiny client over `sc://`, no heavyweight driver bolted to your app. |
+| 4.5 | **Iceberg for Spark 4.3** | The Iceberg runtime, built from source | A short, temporary chapter: no Iceberg release ships a Spark 4.3 runtime yet, so you build it from a pinned commit. It goes away when the release does. |
 | 5 | **Tables & Catalog** | Iceberg through **Unity Catalog OSS** | Create a real transactional table, evolve its schema, then *time-travel* and roll back a mistake. ✨ |
 | 6 | **Ingestion** | Landing raw data → **Bronze** | Load data the modern way (ELT), and make it safely re-runnable so retries never duplicate rows. |
 | 7 | **Transformation** | The **medallion** with Spark Declarative Pipelines | Declare Bronze→Silver→Gold and let the engine figure out the order, the refresh, and the quality checks. |

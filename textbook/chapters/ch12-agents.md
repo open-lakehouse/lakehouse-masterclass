@@ -76,9 +76,12 @@ When your documentation is consistent and complete enough that an agent can foll
 - Never `DROP TABLE`, delete objects under s3://lakehouse/, or delete a stream checkpoint.
 - Prefer read-only SQL (`SELECT`, `SHOW`, `DESCRIBE`); confirm before any write or DDL.
 - Run `make ps` before and after any lifecycle change, and report what changed.
+- While `airflow-scheduler` is up, Airflow owns the medallion (Chapter 9): rebuild Silver+Gold with
+  `docker compose exec airflow-scheduler airflow dags trigger lakehouse_medallion_pipeline`,
+  never `make pipeline`. Two runs at once both append, and Silver ends up doubled.
 ```
 
-This file is the agent's API. Everything in it, service names, ports, the `make` targets, the catalog's table names, is something you built and verified in earlier chapters; you're just writing it down where an agent (or a new teammate) will read it first. It points at the `Makefile` targets rather than raw commands on purpose: `make pipeline` already knows that Silver and Gold refresh as two steps (Chapter 7), so the agent can't get that ordering wrong. (The `Makefile` itself is in Chapter 13; write it now if you're following along with an agent.) The guardrails are specific rather than vague. "Be careful" gives an agent nothing to check; "never `docker compose down -v`" and "never delete objects under `s3://lakehouse/`" are rules it can test a command against before running it.
+This file is the agent's API. Everything in it, service names, ports, the `make` targets, the catalog's table names, is something you built and verified in earlier chapters; you're just writing it down where an agent (or a new teammate) will read it first. It points at the `Makefile` targets rather than raw commands on purpose: `make pipeline` is one `spark-pipelines run`, and SDP works out that Gold reads Silver and builds them in that order (Chapter 7), so there is no ordering for the agent to get wrong. (The `Makefile` itself is in Chapter 13, "Operate it with one command"; write it now if you're following along with an agent.) The last guardrail carries Chapter 9's rule into the agent's instructions: once Airflow schedules the medallion, a `make pipeline` during a DAG run is the overlapping refresh that doubles Silver, so the agent goes through Airflow too. The guardrails are specific rather than vague. "Be careful" gives an agent nothing to check; "never `docker compose down -v`" and "never delete objects under `s3://lakehouse/`" are rules it can test a command against before running it.
 
 **Step 2: give it a plain-English goal.**
 
@@ -87,21 +90,24 @@ You: Bring up the lakehouse stack, run the batch medallion pipeline,
      then show me daily revenue by status from the Gold table.
 ```
 
-**Step 3: watch the agent operate.** It plans and calls tools in sequence, observing each result before the next step:
+**Step 3: watch the agent operate.** It plans and calls tools in sequence, observing each result before the next step. The transcript below is illustrative, written to show the shape of a run rather than copied from one; the exact commands and wording vary with the agent and the model:
 
 ```text
 agent -> make ps                       # what's running? (reads state before acting)
 agent -> make up                       # bring the stack up
 agent -> make ps                       # confirm every service is Up before continuing
-agent -> make pipeline                 # one SDP run: Silver, then Gold
+         # airflow-scheduler is Up, so per AGENTS.md the pipeline runs through Airflow:
+agent -> docker compose exec airflow-scheduler airflow dags trigger lakehouse_medallion_pipeline
+agent -> docker compose exec airflow-scheduler airflow dags list-runs lakehouse_medallion_pipeline
+         # waits until the new run's state is success
 agent -> (SQL over sc://localhost:15002) SELECT order_date, status, revenue, order_count
          FROM iceberg.gold.daily_revenue ORDER BY order_date, status
 agent -> "Here's daily revenue by status: ..."   # reports back
 ```
 
-Expected: the agent brings the stack up, runs the pipeline you built in Chapter 7, reads the Gold table through the catalog, and summarizes the numbers, all from one English instruction, using only the tools you already have.
+Expected: the agent brings the stack up, runs the pipeline you built in Chapter 7 through the DAG from Chapter 9, reads the Gold table through the catalog, and summarizes the numbers, all from one English instruction, using only the tools you already have. (A run triggered without `--logical-date` lands and ingests the day it runs on, as `run_day()` in Chapter 9 explains. Every step is idempotent, so that's harmless, but expect that day to appear in Gold.)
 
-**What just happened?** Trace what the agent did against the loop. It planned a sequence (bring up storage, compute, and catalog; verify; run the pipeline; read results). It acted by calling the exact commands you've typed all course. It observed, notice the `docker compose ps` call, where it checks health before proceeding rather than assuming success. And it reported back in plain language. Every tool it used is one you've used; the agent added planning and adaptation on top of the interfaces you already built.
+**What just happened?** Trace what the agent did against the loop. It planned a sequence (bring up storage, compute, and catalog; verify; run the pipeline; read results). It acted by calling the exact commands you've typed all course. It observed, notice the second `make ps` call, where it checks health before proceeding rather than assuming success, and the `list-runs` call, where it waits for the pipeline run to finish. And it adapted: seeing the scheduler up, it followed the guardrail and triggered the DAG instead of running `make pipeline`. And it reported back in plain language. Every tool it used is one you've used; the agent added planning and adaptation on top of the interfaces you already built.
 
 Then verify it, because trusting an agent blindly is the whole danger. Run the agent's final query yourself and confirm the numbers match what it reported:
 
@@ -116,7 +122,7 @@ For a second, engine-independent check, ask the catalog which snapshot of Gold y
 python -c "from lakehouse.catalog import print_snapshots; print_snapshots('gold', 'daily_revenue')"
 ```
 
-The newest snapshot (marked `*`) should be an `append` committed at the time the agent ran `make pipeline`. If the newest one predates the agent's run, the pipeline didn't do what the agent said it did.
+The newest snapshot (marked `*`) should be an `append` committed during the agent's pipeline run. If the newest one predates the agent's run, the pipeline didn't do what the agent said it did.
 
 The rows should be exactly what the agent summarized. This is the habit to keep even once agents are doing the work: the lakehouse gives you an independent way to check the agent's claim (the same catalog, the same table), so the agent is a fast operator you can audit, not an oracle you have to believe.
 
@@ -173,4 +179,4 @@ The principle uniting these is least privilege plus reversibility: give the agen
 
 ![Progress: Agents complete, Deploy next](../figures/ch12/fig-12.3-progress-agents-done.svg)
 
-**Figure 12.3**. Progress map with **Agents done** and **Deploy** next.
+**Figure 12.3**. Progress map with **Agents** done: every layer of the stack is built. Chapter 13, Deploy and Teardown, comes next.

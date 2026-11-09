@@ -1,0 +1,116 @@
+{
+ "about": "Every value the stateful-sessions scene puts on screen, with where it came from.",
+ "code": {
+  "file": "lakehouse/customer_sessions.py (the Chapter 8 code)",
+  "SESSION_GAP_MS": 15000,
+  "WATERMARK": "10 seconds",
+  "watermark_ms": 10000,
+  "table": "iceberg.gold.customer_sessions",
+  "table_source": "SESSIONS = f\"{CATALOG}.gold.customer_sessions\" with CATALOG defaulting to \"iceberg\" in lakehouse/config.py",
+  "state": "ValueState \"visit\" (start_ms LONG, last_ms LONG); MapState \"orders\" keyed by order_id -> (amount, status); event-time timer at last_ms + SESSION_GAP_MS; an out-of-order order within one gap before start joins the visit and moves start_ms back, one older than start_ms - SESSION_GAP_MS is skipped (only possible before a watermark exists; not drawn in this scene)",
+  "output": "customer_id, session_start, session_end (= last_ms), orders, revenue (sum of amount over the visit's orders whose status is not \"cancelled\"), cancelled, closed_by",
+  "expected_output_row": {
+   "customer_id": "c-1",
+   "start_ms": 2000,
+   "end_ms": 9000,
+   "orders": 3,
+   "revenue": 20.5,
+   "cancelled": 1,
+   "closed_by": "timer",
+   "note": "computed by the scene from the schematic events below by the rules of customer_sessions.py; o-3 (20.00) is cancelled so it is not in revenue"
+  }
+ },
+ "schematic": {
+  "note": "event times, amounts, statuses and order ids are illustrative, not measured; times are seconds after an arbitrary t0. Statuses are drawn from the producer's set (stream_source.py: placed, shipped, cancelled).",
+  "axis_max_s": 55,
+  "events": [
+   {
+    "at": 4.4,
+    "customer": "c-1",
+    "order_id": "o-1",
+    "ts_s": 2,
+    "amount": 12.5,
+    "status": "placed"
+   },
+   {
+    "at": 5.6,
+    "customer": "c-2",
+    "order_id": "o-7",
+    "ts_s": 4,
+    "amount": 31.0,
+    "status": "placed"
+   },
+   {
+    "at": 6.8,
+    "customer": "c-1",
+    "order_id": "o-2",
+    "ts_s": 6,
+    "amount": 8.0,
+    "status": "placed"
+   },
+   {
+    "at": 10.5,
+    "customer": "c-1",
+    "order_id": "o-2",
+    "ts_s": 6,
+    "amount": 8.0,
+    "status": "placed",
+    "resent": true
+   },
+   {
+    "at": 15.3,
+    "customer": "c-1",
+    "order_id": "o-3",
+    "ts_s": 9,
+    "amount": 20.0,
+    "status": "cancelled"
+   },
+   {
+    "at": 16.5,
+    "customer": "c-2",
+    "order_id": "o-8",
+    "ts_s": 18,
+    "amount": 5.25,
+    "status": "shipped"
+   },
+   {
+    "at": 17.7,
+    "customer": "c-2",
+    "order_id": "o-9",
+    "ts_s": 30,
+    "amount": 14.0,
+    "status": "placed"
+   },
+   {
+    "at": 21.3,
+    "customer": "c-2",
+    "order_id": "o-10",
+    "ts_s": 36,
+    "amount": 9.99,
+    "status": "placed"
+   },
+   {
+    "at": 29.4,
+    "customer": "c-1",
+    "order_id": "o-4",
+    "ts_s": 20,
+    "amount": 6.0,
+    "status": "placed",
+    "late": true
+   }
+  ]
+ },
+ "timing": {
+  "note": "schematic event times, not measured",
+  "length": 39.0,
+  "beats": {
+   "open": 0.0,
+   "orders": 4.0,
+   "dup": 10.0,
+   "more": 15.0,
+   "close": 21.0,
+   "late": 29.0,
+   "end": 34.0
+  }
+ }
+}

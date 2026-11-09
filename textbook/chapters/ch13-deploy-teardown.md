@@ -30,9 +30,10 @@ open-lakehouse/
 ├── .env / .env.example     # secrets (gitignored) and the names they need (committed)
 ├── .gitignore              # .env, data/, .venv/, __pycache__/
 ├── config/
-│   ├── spark/spark-defaults.conf        # Connect server: jars, S3, the Iceberg catalog
+│   ├── spark/spark-defaults.conf        # Connect server: Kafka jar, UTC, S3, the Iceberg catalog
 │   └── unity-catalog/server.properties  # catalog: storage bucket + credentials
 ├── docker/
+│   ├── spark/Dockerfile    # Spark 4.3.0 + S3 jars + Python 3.12 (Ch 4), Iceberg runtime (Ch 4.5)
 │   ├── airflow/Dockerfile  # Airflow + a JRE + the Spark Connect client (Chapter 9)
 │   └── mlflow/Dockerfile   # MLflow + boto3 for S3 artifacts (Chapter 11)
 ├── lakehouse/              # the shared package every layer imports
@@ -43,7 +44,8 @@ open-lakehouse/
 │   ├── ingest.py           # idempotent, date-parameterized Bronze ingest
 │   ├── quality.py          # reusable Silver cleaning
 │   ├── stream_source.py    # Kafka producer standing in for an app
-│   └── stream_ingest.py    # Kafka -> Structured Streaming -> Bronze
+│   ├── stream_ingest.py    # Kafka -> Structured Streaming -> Bronze
+│   └── customer_sessions.py  # stateful per-customer sessions (Chapter 8)
 ├── pipelines/medallion/    # the SDP project (Silver + Gold)
 │   ├── spark-pipeline.yml
 │   └── transformations/medallion.py
@@ -88,7 +90,7 @@ train:         ## train + log a model on Gold
 Now the whole lifecycle is `make up`, `make ingest`, `make pipeline`, `make test`, `make train`, `make down`. Three details make it more than a list of aliases:
 
 - **Variables with defaults.** `make ingest` lands the default day; `make ingest DATE=2026-01-10` lands any other. `SPARK_REMOTE ?=` means "use the environment's value if there is one", so the same Makefile drives a remote cluster with `SPARK_REMOTE=sc://... make pipeline`, the Chapter 4 portability idea once more.
-- **The pipeline target is one command because the pipeline is declarative.** `make pipeline` is a single `spark-pipelines run`; SDP works out that Gold reads Silver and builds them in order. Whoever runs it (you next month, a teammate, an agent) doesn't need to know the order, which is the point of declaring it. They do need the Chapter 7 rule if they edit a flow: on a read of another pipeline dataset, use `select`, not `withColumn`.
+- **The pipeline target is one command because the pipeline is declarative.** `make pipeline` is a single `spark-pipelines run`; SDP works out that Gold reads Silver and builds them in order. Whoever runs it (you next month, a teammate, an agent) doesn't need to know the order, which is the point of declaring it. They do need the Chapter 7 rule if they edit a flow: on a read of another pipeline dataset, use `select`, not `withColumn`. And they need Chapter 9's rule before they run it: while Airflow schedules the medallion, start runs with `airflow dags trigger`, not `make pipeline`, because a manual run that overlaps a DAG run doubles Silver.
 - **`.PHONY`.** These targets are commands, not files, and `.PHONY` tells make never to skip them because a file with the same name happens to exist.
 
 That is the operator surface a teammate, or an agent (Chapter 12), drives, and it's the final touch that makes the project feel like a product instead of an exercise. (If `make` complains about a "missing separator", a recipe line was indented with spaces instead of a tab.)
@@ -190,7 +192,7 @@ Expected: volumes and state are cleared. Use this to reclaim disk or start fresh
 
 You've built the core. Concrete ways to deepen each layer:
 
-- **Storage / Tables:** table maintenance, compaction, snapshot expiration, and partition evolution on your Iceberg tables.
+- **Storage / Tables:** partition evolution, MERGE INTO with merge-on-read deletes, and Iceberg format v3 (deletion vectors, VARIANT, row lineage); maintenance for every table, not just Bronze (course issue #14).
 - **Transformation:** add a real data-quality suite and more Gold marts; explore incremental SDP refresh in depth.
 - **Streaming:** exactly-once end to end, schema-registry-backed Kafka, and windowed aggregations in the stream.
 - **Serving:** wire a BI tool (or a semantic layer) onto the Gold tables; try Trino as a third engine.

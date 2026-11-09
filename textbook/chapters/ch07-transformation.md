@@ -49,7 +49,7 @@ The distinction between imperative and declarative is worth making crisp, becaus
 Two primitives cover almost everything you'll do:
 
 - `@dp.materialized_view`: a batch dataset, fully recomputed from its inputs each run. This is what Silver and Gold are in a batch medallion.
-- `@dp.table`: a streaming table, fed incrementally by a streaming read. You'll use this in Chapter 8 when the same Silver is fed from Kafka.
+- `@dp.table`: a streaming table, fed incrementally by a streaming read. This course doesn't build one: Chapter 8 streams Kafka into Bronze with a plain Structured Streaming query, and the next run of this batch pipeline picks those rows up with everything else in Bronze.
 
 Dependencies are not passed as arguments and are never called by you. SDP infers them from the reads inside each function: if `gold.daily_revenue`'s function reads `iceberg.silver.orders`, SDP knows Gold depends on Silver.
 
@@ -61,16 +61,16 @@ Dependencies are not passed as arguments and are never called by you. SDP infers
 
 SDP projects have a standard shape, and the tooling scaffolds it for you. Back in Chapter 2 you left a `pipelines/` folder empty for exactly this moment.
 
-**Step 1: install the tooling and scaffold the project.** Two prerequisites first. Install the pipelines extra on your host, pinned to match your 4.1.0 Connect server (a bare `pip install 'pyspark[pipelines]'` now pulls a newer release, and client/server skew causes confusing errors). And make sure you have a JDK (Java 17 or newer) on your host: `spark-pipelines` is launched through `spark-class`, so it starts a small JVM even though Spark itself runs in a container. This is the one host tool in the course that needs Java; `java -version` tells you whether you have it.
+**Step 1: install the tooling and scaffold the project.** Two prerequisites first. Install the pipelines extra on your host, pinned to match your 4.3.0 Connect server (once a newer PySpark is released, a bare `pip install 'pyspark[pipelines]'` pulls it, and client/server skew causes confusing errors). And make sure you have a JDK on your host (Java 17, 21 or 25, the versions Spark 4.3 supports): `spark-pipelines` is launched through `spark-class`, so it starts a small JVM even though Spark itself runs in a container. This is the one host tool in the course that needs Java; `java -version` tells you whether you have it.
 
 ```bash
-pip install 'pyspark[pipelines]==4.1.0'
-java -version            # 17 or newer
+pip install 'pyspark[pipelines]==4.3.0'
+java -version            # 17, 21 or 25
 cd pipelines
 spark-pipelines init --name medallion
 ```
 
-That creates a `medallion/` subdirectory with a `spark-pipeline.yml` spec and a `transformations/` folder holding two example definitions (one Python, one SQL). Delete both example files in `transformations/`; you'll write your own.
+That creates a `medallion/` subdirectory with a `spark-pipeline.yml` spec, an empty `pipeline-storage/` folder, and a `transformations/` folder holding two example definitions (one Python, one SQL). Delete both example files in `transformations/` (you'll write your own) and the `pipeline-storage/` folder (Step 2 points the pipeline's storage somewhere else).
 
 **Step 2: point the spec at your catalog.** Edit `medallion/spark-pipeline.yml` so the pipeline writes into your Iceberg catalog and finds your transformation files:
 
@@ -78,36 +78,49 @@ That creates a `medallion/` subdirectory with a `spark-pipeline.yml` spec and a 
 name: medallion
 catalog: iceberg
 database: silver
-storage: file:///tmp/medallion-storage
+storage: s3a://lakehouse/_pipelines/medallion   # one place, shared by manual and scheduled runs
 libraries:
   - glob:
       include: transformations/**
 ```
 
-The `catalog` is the Unity Catalog OSS catalog you built in Chapter 5. `database` is the default schema for any dataset whose name you don't qualify; leave it out and SDP falls back to a schema called `default`, which doesn't exist in your catalog, and the run fails with `SCHEMA_NOT_FOUND`. SDP does not create schemas for you, so `iceberg.silver` and `iceberg.gold` must already exist (you created them at the end of Chapter 5; if not, run `CREATE NAMESPACE IF NOT EXISTS iceberg.silver` and the same for `gold` now). `storage` is where SDP keeps pipeline state such as streaming checkpoints; note that this path is resolved by the Connect server, not your laptop, so `file:///tmp/...` means the server container's `/tmp`. That's fine for the materialized views here, which keep no state between runs. `libraries` tells SDP where your dataset definitions live.
+The `catalog` is the Unity Catalog OSS catalog you built in Chapter 5. `database` is the default schema for any dataset whose name you don't qualify; leave it out and SDP falls back to a schema called `default`, which doesn't exist in your catalog, and the run fails with `SCHEMA_NOT_FOUND`. SDP does not create schemas for you, so `iceberg.silver` and `iceberg.gold` must already exist (you created them at the end of Chapter 5; if not, run `CREATE NAMESPACE IF NOT EXISTS iceberg.silver` and the same for `gold` now). `libraries` tells SDP where your dataset definitions live.
+
+`storage` is the root where SDP keeps a pipeline's own metadata, chiefly the checkpoints of streaming flows: which input a streaming table has already consumed, and any state it carries between micro-batches. The materialized views in this chapter keep nothing there between runs, since each refresh recomputes them from their inputs, but the spec requires the field, and its value matters the moment a pipeline gains a streaming flow. Two properties decide where it should point. The path is used by the Spark cluster, not by the machine that runs `spark-pipelines`: checkpoint files are written by the Connect server's driver and by executors on the worker, in different containers. A `file://` path would name a separate local directory in each of them, and every copy would vanish when its container is recreated. (The default that `init` wrote, `file://` plus your project folder's path, names a folder on your laptop; inside the containers it would be just another local directory.) And every run of the pipeline has to use the same root, whether you start it from your laptop or Airflow starts it in Chapter 9, or each would keep its own checkpoints and a streaming flow would re-read input the other had already processed. `s3a://lakehouse/_pipelines/medallion` meets both: every Spark process reaches the same SeaweedFS bucket, and it survives a recreate.
 
 **Step 3: put reusable cleaning in the package, then declare the datasets.** The Silver cleaning (drop bad rows, dedupe, conform types) is exactly the kind of logic you want reusable and testable, not buried in a pipeline file. Put it in `lakehouse/quality.py` as a plain DataFrame-in, DataFrame-out function:
 
 ```python
 # lakehouse/quality.py
-from pyspark.sql import DataFrame, functions as F
-
+from pyspark.sql import DataFrame, Window, functions as F
 
 def clean_orders(df: DataFrame) -> DataFrame:
-    """Silver-grade cleaning: drop invalid rows, dedupe, conform types.
+    """Silver-grade cleaning: drop invalid rows, conform types, dedupe.
     A pure transformation (DataFrame in, DataFrame out), so it is reusable and
     unit-testable on its own, without running the whole pipeline."""
+    # When two rows share an order_id, keep the most recent event for it. The
+    # later columns only break ties, so the choice never depends on which row
+    # Spark happens to read first: the same Bronze always gives the same Silver.
+    latest_first = Window.partitionBy("order_id").orderBy(
+        F.col("created_at").desc(), F.col("amount").desc(), "status", "customer_id")
     return (df
         .filter("order_id IS NOT NULL")                         # must have a key
         .filter("amount > 0")                                   # drop bad amounts
-        .dropDuplicates(["order_id"])                           # one row per order
         .withColumn("status", F.lower(F.col("status")))         # conform casing
         .withColumn("amount", F.col("amount").cast("decimal(10,2)"))  # money is exact, not float
-        .withColumn("created_at", F.to_timestamp("created_at"))       # string -> real timestamp
+        # string -> real timestamp; Bronze strings carry no offset and are UTC
+        # (spark.sql.session.timeZone is UTC in spark-defaults.conf)
+        .withColumn("created_at", F.to_timestamp("created_at"))
+        .withColumn("_rank", F.row_number().over(latest_first))
+        .filter("_rank = 1")                                    # one row per order
         .select("order_id", "customer_id", "amount", "status", "created_at"))
 ```
 
 One line deserves a pause: casting `amount` to `DECIMAL(10,2)`. In Bronze the amount is a `DOUBLE`, a binary floating-point number, and floats can't represent most cents exactly. Sum a few hundred of them and the error shows: an earlier version of this pipeline, which left `amount` as a double, reported one day's cancelled revenue as `48309.499999999985`. Nobody wants that in a finance dashboard. A `DECIMAL(10,2)` stores exactly two digits after the point, so sums are exact. Conforming types like this is precisely Silver's job: Bronze keeps what the source sent, Silver decides what it means.
+
+The dedup deserves a pause too. Bronze holds re-sent copies of some orders, so Silver has to keep exactly one row per `order_id`. The obvious tool, `dropDuplicates(["order_id"])`, keeps whichever row for a key it happens to meet first, and that depends on how the input files were split into partitions and on the order rows arrive after a shuffle. Spark makes no promise about it. When the copies are identical, as the generator's re-sends are, that's harmless. When they differ (an order that was placed and later shipped, or a re-send with a corrected amount), two runs over the same Bronze can keep different rows, and Silver, and every Gold number built on it, changes although no input did. The window makes the choice explicit. `row_number()` numbers each order's rows, newest `created_at` first, and `filter("_rank = 1")` keeps the newest. `amount`, `status` and `customer_id` in the ordering only break ties between rows with the same timestamp, and rows that tie on all four are identical in every column Silver keeps, so it doesn't matter which one survives: the same Bronze always gives the same Silver. The ranking runs after the type conversions, so it compares real timestamps, not strings. And the `Window` is built inside the function on purpose. PySpark picks its Connect or classic implementation at the moment a `Window` is created, by checking for a running Connect session. A `Window` at module level is created when the module is imported, which can be before any session exists (`pytest` imports `lakehouse.quality` before a test calls `get_spark()`), and then it fails with `SESSION_OR_CONTEXT_NOT_EXISTS`.
+
+`to_timestamp` also depends on a setting you made in Chapter 4. The Bronze strings carry no offset (`2026-01-05T09:00:00`), and Spark parses such a string in the session time zone, which the Connect server's `spark-defaults.conf` sets to UTC. So Silver stores the instant the source meant, and Gold's `to_date()` assigns each order to its UTC day whatever machine the job runs on. Without that line, the session time zone would be the default zone of the server's JVM: the instants in Silver would shift with the server's clock settings, and an order near midnight could land on a different `order_date` depending on where the pipeline ran.
 
 Now create the SDP datasets in `medallion/transformations/medallion.py`. Each function returns a DataFrame and is registered as a dataset; dependencies are expressed by reading other tables with `spark.read.table(...)`. Silver is a one-liner that calls your reusable cleaner:
 
@@ -137,7 +150,7 @@ def gold_daily_revenue():
     )
 ```
 
-SDP loads this file directly, which is why it binds `spark = SparkSession.active()` itself: nothing injects a `spark` variable into a transformations module for you. For the file to `import lakehouse.quality`, your package must be installed in the environment that runs `spark-pipelines`, which it is: you ran `pip install -e .` in Chapter 2.
+SDP loads this file directly, and since Spark 4.2 it injects a `spark` variable into every transformations module (the example file `init` generated uses `spark` without defining it). So the line `spark = SparkSession.active()` is optional: it binds the same session SDP is running, and keeps the name defined for anyone, or any linter, reading the file on its own. What a pipeline file can't do is change that session while SDP imports it: `spark.conf.set(...)`, switching the current catalog or database, creating temporary views, or registering UDFs at module level fail with `SESSION_MUTATION_IN_DECLARATIVE_PIPELINE`. For the file to `import lakehouse.quality`, your package must be installed in the environment that runs `spark-pipelines`, which it is: you ran `pip install -e .` in Chapter 2.
 
 **What just happened?** Read the two functions and notice what's absent: nowhere do you say "run Silver before Gold," and you never call these functions yourself. `gold_daily_revenue` reads `iceberg.silver.orders`, and that read is the dependency. SDP scans the declarations, sees that Gold depends on Silver (which depends on Bronze), and infers the whole graph. You wrote what each dataset is, not when to build it. That's the declarative model in one screen of code.
 
@@ -242,7 +255,7 @@ Flow iceberg.silver.orders is RUNNING.
 Flow iceberg.gold.daily_revenue is RUNNING.
 ```
 
-SDP no longer knows that Gold depends on Silver. Here is the mechanism, because it's a genuine gap in Spark rather than anything you did wrong (it reproduces on stock Spark 4.1.0, 4.1.3 and 4.2.0, and on the main branch as of this writing). SDP learns a flow's dependencies by finding the reads of other pipeline datasets in the flow's (unresolved) query plan. Over Spark Connect, though, `withColumn` is sent to the server as its own plan node, and the Connect server tries to analyze it eagerly the moment it arrives, which means looking `iceberg.silver.orders` up in the catalog. On the very first run Silver doesn't exist yet, the eager analysis fails, the server keeps the unresolved plan, and SDP finds the dependency. From the second run on Silver does exist, the read gets resolved straight to the catalog table, and SDP sees an ordinary external table instead of its own dataset. It then refreshes Gold alongside Silver, at the moment Silver has just been truncated for its own refresh (every run truncates the materialized views it rebuilds first), so Gold aggregates an empty table.
+SDP no longer knows that Gold depends on Silver. Here is the mechanism, because it's a genuine gap in Spark rather than anything you did wrong (it reproduces on stock Spark 4.1.0 through 4.3.0; the fix is not in the v4.3.0 release). SDP learns a flow's dependencies by finding the reads of other pipeline datasets in the flow's (unresolved) query plan. Over Spark Connect, though, `withColumn` is sent to the server as its own plan node, and the Connect server tries to analyze it eagerly the moment it arrives, which means looking `iceberg.silver.orders` up in the catalog. On the very first run Silver doesn't exist yet, the eager analysis fails, the server keeps the unresolved plan, and SDP finds the dependency. From the second run on Silver does exist, the read gets resolved straight to the catalog table, and SDP sees an ordinary external table instead of its own dataset. It then refreshes Gold alongside Silver, at the moment Silver has just been truncated for its own refresh (every run truncates the materialized views it rebuilds first), so Gold aggregates an empty table.
 
 Be careful when you borrow from Spark's own SDP programming guide: its `daily_orders_by_state` example ends in `.withColumnRenamed("count", "order_count")` on a read of another pipeline dataset, so run over Connect a second time, it hits this same gap. Rewrite that last step as a `select` with an alias.
 
@@ -252,7 +265,7 @@ The bug is tracked upstream as [SPARK-59663](https://issues.apache.org/jira/brow
 - **Reads of tables outside the pipeline are unaffected.** That's why `clean_orders` can use `withColumn` freely: Silver reads Bronze, which this pipeline doesn't define, so there's no dependency to lose.
 - **Verify across runs, not just once.** A single green run proves very little here. The check above (Gold's counts summing to Silver's rows) is cheap, and it's exactly the kind of assertion worth adding to `tests/` or to the end of a scheduled run.
 
-One related property is worth knowing. A materialized-view refresh here is two commits, a `delete` (the truncate) and then an `append`, not the single atomic commit you saw for `INSERT` and `DELETE` in Chapter 5. A reader that queries Gold in the moment between them sees an empty table. List Silver's snapshots with the helper from Chapter 5 (`print_snapshots("silver", "orders")`) and you'll see the `delete`/`append` pairs, one per refresh. For a local course that's harmless; for a dashboard refreshing during business hours, it's the kind of detail you'd want to know before production.
+One related property is worth knowing. A materialized-view refresh here is two commits, a `delete` (the truncate) and then an `append`, not the single atomic commit you saw for `INSERT` and `DELETE` in Chapter 5. A reader that queries Gold in the moment between them sees an empty table. List Silver's snapshots with the helper from Chapter 5 (`print_snapshots("silver", "orders")`) and you'll see the `delete`/`append` pairs, one per refresh. For a local course that's harmless; for a dashboard refreshing during business hours, it's the kind of detail you'd want to know before production. The split has a second consequence when two runs of the pipeline overlap: their deletes and appends interleave, and Silver ends up holding both results. Chapter 9 shows how that happens once a scheduler can start runs too, and how to rule it out.
 
 ## Data quality in OSS Spark Declarative Pipelines
 
@@ -288,14 +301,17 @@ def test_clean_orders_drops_bad_and_dedupes():
         [("o1", "c1", 10.0, "PLACED", "2026-01-05T09:00:00"),   # valid (status uppercased)
          ("o1", "c1", 10.0, "placed", "2026-01-05T09:00:00"),   # duplicate order_id
          (None, "c2", 10.0, "placed", "2026-01-05T09:00:00"),   # null key -> dropped
-         ("o3", "c3", -1.0, "placed", "2026-01-05T09:00:00")],  # bad amount -> dropped
+         ("o3", "c3", -1.0, "placed", "2026-01-05T09:00:00"),   # bad amount -> dropped
+         ("o4", "c4", 25.0, "placed", "2026-01-05T09:00:00"),   # o4 was placed...
+         ("o4", "c4", 25.0, "shipped", "2026-01-05T11:30:00")], # ...then shipped: keep the latest
         ["order_id", "customer_id", "amount", "status", "created_at"])
 
     clean = clean_orders(df).collect()
 
-    assert len(clean) == 1                 # only o1 survives, and only once (deduped)
-    assert clean[0].order_id == "o1"
-    assert clean[0].status == "placed"     # casing conformed
+    by_id = {r.order_id: r for r in clean}
+    assert sorted(by_id) == ["o1", "o4"]   # o1 and o4 survive, once each (deduped)
+    assert by_id["o1"].status == "placed"  # casing conformed
+    assert by_id["o4"].status == "shipped" # the most recent event wins, every run
 
 
 def test_clean_orders_conforms_types():
@@ -315,7 +331,7 @@ def test_clean_orders_conforms_types():
     assert row.status == "shipped"
 ```
 
-The first test covers what gets dropped, the second covers what gets *kept and conformed*, including the guest checkout that a careless filter on `customer_id` would have thrown away. Note the second test spells out its schema as a DDL string: its only `customer_id` is `None`, and Spark can't infer a column's type from nothing but nulls.
+The first test covers what gets dropped and how duplicates collapse: `o4` arrives twice, placed at 09:00 and shipped at 11:30, and Silver must keep the shipped row on every run, which `dropDuplicates` could not promise. The second covers what gets *kept and conformed*, including the guest checkout that a careless filter on `customer_id` would have thrown away. Note the second test spells out its schema as a DDL string: its only `customer_id` is `None`, and Spark can't infer a column's type from nothing but nulls.
 
 Run them:
 
@@ -331,8 +347,8 @@ The tests need the Connect server up (they use `get_spark()`), so they're really
 
 - **SDP reports a cycle or can't resolve the graph.** Two datasets read each other, or a function reads a table that isn't declared and doesn't exist. Check that every table you read either exists (like Bronze) or is declared in the pipeline.
 - **A dataset materializes empty.** Often an over-strict filter removed every row, or the upstream table was empty. Check your filter conditions and confirm Bronze actually has data.
-- **`ModuleNotFoundError: pyspark.pipelines` or `spark-pipelines: command not found`.** The pipelines extra isn't installed in the environment you're running from (activate your project's venv), or you're on a Spark older than 4.1. Run `pip install 'pyspark[pipelines]==4.1.0'`.
-- **`spark-pipelines` fails to launch with a Java error.** The CLI starts a JVM under the hood (via `spark-class`), so it needs a JDK (Java 17+) on your host. See Step 1.
+- **`ModuleNotFoundError: pyspark.pipelines` or `spark-pipelines: command not found`.** The pipelines extra isn't installed in the environment you're running from (activate your project's venv), or you're on a Spark older than 4.1. Run `pip install 'pyspark[pipelines]==4.3.0'`.
+- **`spark-pipelines` fails to launch with a Java error.** The CLI starts a JVM under the hood (via `spark-class`), so it needs a JDK (Java 17, 21 or 25) on your host. See Step 1.
 - **`SCHEMA_NOT_FOUND` for `iceberg`.`default` or `iceberg`.`silver`.** The spec is missing `database: silver`, or the `silver`/`gold` namespaces don't exist yet. SDP won't create schemas; create them with `CREATE NAMESPACE IF NOT EXISTS`.
 - **Gold is empty after a run that said `COMPLETED`.** Gold uses `withColumn` (or `withColumnRenamed`) on its read of Silver, so from the second run on SDP no longer knows Gold depends on Silver and builds Gold from a just-truncated table. Shape the columns with `select` instead (see "Run it again, and verify"), then re-run and check that Gold's `order_count` sums to Silver's row count.
 - **`Cannot change column type: amount: double -> decimal(10, 2)`.** You changed a column's type in a dataset that already exists. A refresh, even `--full-refresh-all`, keeps the table and only resets its data, and Iceberg can't change a double into a decimal in place. Drop the table (`DROP TABLE iceberg.silver.orders PURGE`, and Gold too) and run again. Iceberg can widen some types in place (`int` to `bigint`, `float` to `double`), but not this one.
@@ -369,8 +385,9 @@ The tests need the Connect server up (they use `get_spark()`), so they're really
 - Spark Declarative Pipelines let you declare datasets and dependencies; the engine derives the graph and refresh, built on Spark Connect.
 - Data quality lives in the dataset definition as ordinary filters (drop) or raised errors (fail). The named-expectations API is a Databricks feature, not part of OSS.
 - Cleaning logic lives in a reusable `lakehouse/quality.py` function that Silver calls and `tests/` verifies, so the rules protecting Gold are themselves tested. Money is conformed to an exact `DECIMAL`.
-- "It said COMPLETED" is not verification: re-run and check the counts. In Spark 4.1 and 4.2, a flow that reads another pipeline dataset should shape columns with `select`, not `withColumn`, or SDP can lose the dependency.
-- **Next, Chapter 8, Streaming:** feed the same Silver continuously from Kafka with a streaming table, and contrast streaming with the batch pipeline you just built.
+- "It said COMPLETED" is not verification: re-run and check the counts. In Spark 4.1 through 4.3, a flow that reads another pipeline dataset should shape columns with `select`, not `withColumn`, or SDP can lose the dependency.
+- Silver dedups with a window, so the same Bronze always gives the same Silver, and timestamps parse as UTC because the server says so, not the machine.
+- **Next, Chapter 8, Streaming:** feed the same Bronze table continuously from Kafka with Structured Streaming, and contrast streaming with the batch pipeline you just built.
 
 ![Progress: Transformation complete, Streaming next](../figures/ch07/fig-7.4-progress-transform-done.svg)
 

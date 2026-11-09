@@ -217,3 +217,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 .sdp-ground-truth.md
+
+# Animation and film renders (delivered outside the repo)
+**/renders/
+*.mp4

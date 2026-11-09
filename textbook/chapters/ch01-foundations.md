@@ -197,7 +197,7 @@ If every box is checked, you have a defensible architecture you could put in a d
 - The hard-to-reverse decisions are table format and catalog. Make those deliberately; the rest are cheaper to change.
 - Default to Iceberg plus Unity Catalog OSS (REST) plus S3-API storage plus Spark Connect, batch-first, self-host-to-learn and managed-where-you-must, and deviate only with a reason.
 - Build bottom-up, one verifiable layer at a time, following one real dataset.
-- **Next, Chapter 2, Setup:** install the prerequisites and bring up the one control CLI you'll drive the whole stack with.
+- **Next, Chapter 2, Setup:** install the prerequisites, lay out the project as an installable Python package, and confirm Docker can run containers.
 
 ![Progress: Foundations complete, Setup next](../figures/ch01/fig-1.5-progress-foundations-done.svg)
 
