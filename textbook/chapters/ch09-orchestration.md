@@ -316,6 +316,14 @@ With the DAG unpaused, the medallion has two ways to start: the scheduler, and y
 
 **What happens.** In a verification run on the course stack, with several days of orders loaded, two `spark-pipelines run` commands of the medallion were started together, which is what a scheduled run and a manual run amount to. Both printed `Run is COMPLETED`. Silver went from 3271 rows to 6542, every order twice. Gold went from 9 rows to 18, and its `order_count` column summed to 9813.
 
+<figure markdown="span">
+  <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/refresh-race.webp">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/refresh-race.mp4" type="video/mp4">
+  </video>
+  <figcaption>A filmed run of the race, with more orders loaded than the run above: both runs say COMPLETED, Silver holds every order twice (11286 rows, 5643 distinct order ids), and Gold's order counts sum to 16929.</figcaption>
+</figure>
+
+
 **Why.** Chapter 7 showed that a materialized-view refresh is two commits: a `delete` that empties the table, then an `append` of the recomputed result. Two refreshes at once interleave those commits. Here is Silver's commit log from that run, read from the catalog's Iceberg REST endpoint (the same table metadata `lakehouse/catalog.py` reads), with the commit time, the operation, the rows each commit added and deleted, and the table's total afterwards:
 
 ```
@@ -327,6 +335,14 @@ commits on silver.orders after snapshot 1175202214321322638:
 ```
 
 The first run emptied Silver. The second run emptied a table that was already empty. Then each appended its own result, both computed from the same Bronze, so the second append is a full copy of the first. Iceberg accepted all four commits because each one is valid on its own; it rejects a commit only when it conflicts with another one, two appends never conflict, and nothing tells Iceberg that these four commits are two refreshes. Gold went through the same sequence, and its two refreshes read Silver at different moments, one after Silver's first append (3271 orders) and one after the second (6542), which is where 9813 comes from. In between, for about two seconds, anyone reading Silver saw an empty table.
+
+<figure markdown="span">
+  <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/refresh-race-commits.webp">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/refresh-race-commits.mp4" type="video/mp4">
+  </video>
+  <figcaption>Silver's last four commits on the same filmed run, read from the catalog: two deletes, then two full appends of 5643 rows each.</figcaption>
+</figure>
+
 
 This isn't hypothetical. It first happened in this course by accident, back when the Compose file let new DAGs start unpaused: the DAG's first scheduled run started while a Chapter 7 run was still going, and Silver went from 1899 rows to 3798. That's why `DAGS_ARE_PAUSED_AT_CREATION` is now `"true"` and Step 6 has you unpause by hand.
 
