@@ -318,7 +318,7 @@ With the DAG unpaused, the medallion has two ways to start: the scheduler, and y
 
 <figure markdown="span">
   <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/refresh-race.webp">
-    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/refresh-race.mp4" type="video/mp4">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v2/refresh-race.mp4" type="video/mp4">
   </video>
   <figcaption>A filmed run of the race, with more orders loaded than the run above: both runs say COMPLETED, Silver holds every order twice (11286 rows, 5643 distinct order ids), and Gold's order counts sum to 16929.</figcaption>
 </figure>
@@ -338,7 +338,7 @@ The first run emptied Silver. The second run emptied a table that was already em
 
 <figure markdown="span">
   <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/refresh-race-commits.webp">
-    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/refresh-race-commits.mp4" type="video/mp4">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v2/refresh-race-commits.mp4" type="video/mp4">
   </video>
   <figcaption>Silver's last four commits on the same filmed run, read from the catalog: two deletes, then two full appends of 5643 rows each.</figcaption>
 </figure>

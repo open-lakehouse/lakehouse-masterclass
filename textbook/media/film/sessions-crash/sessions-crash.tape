@@ -5,6 +5,7 @@
 # render the whole tape, between the off-camera helpers:
 #   film-setup.sh landscape && film render sessions-crash.tape --demo <course project>; film-teardown.sh
 #   film-setup.sh vertical  && film render sessions-crash.tape --demo <course project> --format vertical; film-teardown.sh
+#   film-setup.sh chapter   && film render sessions-crash.tape --demo <course project> --format chapter; film-teardown.sh
 # The waits (visits closing, the server coming back) are cut with Hide/Sleep at the ends
 # of beats.
 Set TypingSpeed 20ms

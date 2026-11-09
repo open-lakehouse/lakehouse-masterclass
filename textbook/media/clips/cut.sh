@@ -3,11 +3,14 @@
 #
 # The sources are the full renders from textbook/media/anim (create-animation)
 # and textbook/media/film (film-demo), which are kept out of git. Start and end
-# times in clips.tsv are the beat boundaries from each film's cue sheet.
+# times in clips.tsv are the beat boundaries from each film's cue sheet. Films
+# for the chapters are rendered with `--format chapter` (1280x720 at 20px): a
+# 1920-wide terminal is unreadable in a ~700px content column.
 #
-# The MP4s are not committed either. Upload them as assets of the GitHub
-# release media-v1, which the chapters link to:
-#   gh release upload media-v1 out/*.mp4 --clobber
+# The MP4s are not committed either. They are assets of a GitHub release that
+# the chapters link to. A recut goes on a new release (media-v3, ...) and the
+# chapter links move with the PR, so main keeps playing the clips it captions:
+#   gh release create media-vN --prerelease --title "Chapter media vN" out/*.mp4
 # The posters (small WebP stills) are committed next to this script.
 #
 # Usage: cut.sh <renders-dir>   (the dir holding anim/ and film/)

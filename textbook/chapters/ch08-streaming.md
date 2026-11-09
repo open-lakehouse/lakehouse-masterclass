@@ -411,7 +411,7 @@ The processor runs in Python workers on the Spark cluster, not in your client, w
 
 <figure markdown="span">
   <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/stateful-sessions.webp">
-    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/stateful-sessions.mp4" type="video/mp4">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v2/stateful-sessions.mp4" type="video/mp4">
   </video>
   <figcaption>The processor below, step by step: each order updates the visit, its map entry and the timer; a re-sent order lands on the same map key; the visit closes when the watermark passes its timer. The 15-second gap and 10-second watermark are the code's; event times and amounts are schematic.</figcaption>
 </figure>
@@ -632,7 +632,7 @@ These are the visits still open: `c-17`'s visit started at `1794004712091` and i
 
 <figure markdown="span">
   <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/sessions-state-store.webp">
-    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/sessions-state-store.mp4" type="video/mp4">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v2/sessions-state-store.mp4" type="video/mp4">
   </video>
   <figcaption>Step 9 on a filmed run: the state data source reading the open visits, their order maps and their registered timers while the query runs. The keys and timestamps differ from the output above because it's a different run.</figcaption>
 </figure>
@@ -662,9 +662,9 @@ No visit was written twice, and none was lost: the restarted query restored each
 
 <figure markdown="span">
   <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/sessions-crash-restart.webp">
-    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/sessions-crash-restart.mp4" type="video/mp4">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v2/sessions-crash-restart.mp4" type="video/mp4">
   </video>
-  <figcaption>Step 10 on a filmed run: restart the Connect server under the query, start the job again with the same command, and a minute later rows equal visits (298 on this run).</figcaption>
+  <figcaption>Step 10 on a filmed run: restart the Connect server under the query, start the job again with the same command, and a minute later rows equal visits (303 on this run).</figcaption>
 </figure>
 
 

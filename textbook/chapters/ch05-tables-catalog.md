@@ -772,7 +772,7 @@ pyspark.errors.exceptions.connect.UnknownException:
 Each of them makes Spark ask the catalog for a name under `bronze.orders`, and Unity Catalog 0.7.0 answers "no such namespace." That is why the steps above unset `spark.wap.branch` right after the write and read the branch with `VERSION AS OF '<branch>'`, which works. The fix is the same Unity Catalog change as the metadata tables ([course issue #6](https://github.com/open-lakehouse/lakehouse-masterclass/issues/6)).
 <figure markdown="span">
   <video autoplay loop muted playsinline controls width="1280" height="720" poster="../../media/clips/iceberg-commit.webp">
-    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v1/iceberg-commit.mp4" type="video/mp4">
+    <source src="https://github.com/open-lakehouse/lakehouse-masterclass/releases/download/media-v2/iceberg-commit.mp4" type="video/mp4">
   </video>
   <figcaption>Every write in this chapter is one swap of <code>metadata-location</code> in the catalog: an insert, a delete, a rollback that rewrites no data, and write-audit-publish on a branch. Labels and timing are schematic; the behaviour was checked on the course stack.</figcaption>
 </figure>
