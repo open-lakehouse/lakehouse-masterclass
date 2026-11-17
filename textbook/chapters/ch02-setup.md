@@ -4,7 +4,7 @@ Chapter 1 was decisions. This is where you start running things. By the end you'
 
 A lakehouse is a handful of services (an object store, a Spark cluster, a catalog and its database, and later Kafka and an orchestrator), their configuration, and the wiring that lets them find each other. You're going to build that yourself, one service at a time, so you understand exactly what's running and can fix it when something breaks. The services run as containers, and Docker Compose is what defines and runs them, so that's the tool at the center of this chapter.
 
-This chapter does the groundwork the rest of the build stands on: install the prerequisites, lay out the project directory, set up configuration and secrets properly before there are any secrets to leak, and confirm Docker actually works. You won't stand up a lakehouse service yet. That starts in the next chapter with the object store. What you'll have when you finish here is a clean, working foundation to build on.
+This chapter does the groundwork the rest of the build stands on: install the prerequisites, lay out the project directory, set up configuration and secrets properly before there are any secrets to leak, and confirm Docker actually works. You won't stand up a lakehouse service yet. First, Chapter 3 defines the agent that will work in the lakehouse with you; the services start in Chapter 4 with the object store. What you'll have when you finish here is a clean, working foundation to build on.
 
 ![Progress: Setup](../figures/ch02/fig-2.1-progress-setup.svg)
 
@@ -72,13 +72,13 @@ Every command in this book is written for a Linux shell (bash, `apt`, and so on)
 The point of running everything in containers is that your host stays clean, so the list of things you install directly is short. Four tools:
 
 - **Docker, with the Compose plugin.** This is the one that matters. It runs every service in the stack, so if you install nothing else, install this. Follow Docker's official install guide for your OS, it's kept current and is the authoritative source: [Docker Desktop for Mac](https://docs.docker.com/desktop/install/mac-install/), [Docker Desktop for Windows](https://docs.docker.com/desktop/install/windows-install/) (enable the WSL2 backend when prompted), or [Docker Engine](https://docs.docker.com/engine/install/) on Linux (install the `docker-compose-plugin` package alongside it). A couple of notes the guides don't stress: use `docker compose` (two words, the built-in plugin), not the deprecated standalone `docker-compose`; and on Linux, add your user to the `docker` group so you don't need `sudo` for every command.
-- **Python 3.12.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day. The version is pinned, not a minimum. PySpark 4.3 needs Python 3.11 or newer, and the course uses 3.12 because that is the Python inside the Spark image you build in Chapter 4. Some of your Python code runs on the cluster, not on your laptop (Python UDFs, and the stateful processor in Chapter 8), in a Python worker that the Spark server starts, and PySpark refuses to run it when the worker's minor version differs from your client's, failing with `[PYTHON_VERSION_MISMATCH] Python in worker has different version`. Ubuntu 24.04 ships 3.12 as `python3`; on macOS, `brew install python@3.12`; on older Linux releases, install it from your distribution's backports (on Ubuntu 22.04, the deadsnakes PPA provides `python3.12` and `python3.12-venv`).
+- **Python 3.12.** You'll write pipeline code and talk to Spark from Python, from your host, so you need it locally. This is the language you'll actually work in day to day. The version is pinned, not a minimum. PySpark 4.3 needs Python 3.11 or newer, and the course uses 3.12 because that is the Python inside the Spark image you build in Chapter 5. Some of your Python code runs on the cluster, not on your laptop (Python UDFs, and the stateful processor in Chapter 9), in a Python worker that the Spark server starts, and PySpark refuses to run it when the worker's minor version differs from your client's, failing with `[PYTHON_VERSION_MISMATCH] Python in worker has different version`. Ubuntu 24.04 ships 3.12 as `python3`; on macOS, `brew install python@3.12`; on older Linux releases, install it from your distribution's backports (on Ubuntu 22.04, the deadsnakes PPA provides `python3.12` and `python3.12-venv`).
 - **Git.** To version your project: the Compose file, config, and pipeline code you build. Assume you have it; if not, install it.
 - **The AWS CLI.** Your object store speaks the S3 API, and the AWS CLI is the standard way to poke at S3 from the command line, create buckets, copy files, list objects, whether the store is Amazon S3 or your local one. Install version 2 with [AWS's installer](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) or your OS package manager. You'll first use it in the next chapter to talk to your object store, through a dedicated `lakehouse` profile so the course never touches any real AWS configuration you already have.
 
 Notice what's *not* here. You don't install Spark, or a JVM, or a database on your host. Spark is a JVM application, but its Java lives inside the Spark container you'll define in the Compute chapter, so there's nothing to set up for it now. The catalog's database is a container too. Keeping these off your host is the whole point of the container approach: the only things touching your machine are the client tools (Docker, Python, Git, and the AWS CLI), never the services themselves.
 
-A note on hardware, because this is real distributed-systems software running locally. Plan for around 16 GB of RAM to run the full stack comfortably; 8 GB works if you bring services up one at a time and stop what you're not using, which the one-service-per-chapter structure makes easy. Give Docker a generous memory allowance in its settings (on Docker Desktop, under Resources), since the default is often too low for Spark. Budget 20 to 50 GB of free disk for container images and data.
+A note on hardware, because this is real distributed-systems software running locally. Plan for around 16 GB of RAM to run the full stack comfortably; 8 GB works if you bring services up one at a time and stop what you're not using, which the one-service-per-chapter structure makes easy. Give Docker a generous memory allowance in its settings (on Docker Desktop, under Resources), since the default is often too low for Spark. Budget 20 to 50 GB of free disk for container images and data. The agent's model (Chapter 3) is separate from all that: about 9 GB of disk, and about 12 GB of memory while it's loaded, best on a GPU or Apple Silicon. The short Agent steps from Chapter 5 on run the model and the stack at the same time, which wants more than 16 GB; with less, run them with only the services that step needs, and unload the model (`ollama stop sdp-qwen3`) whenever you're done with the agent.
 
 After installing, confirm the tools are present:
 
@@ -113,11 +113,11 @@ What each is for:
 - **`lakehouse/`** is the heart: a Python *package* holding the shared, reusable code the whole project runs on, the connection config, a Spark session factory, the ingestion and data-quality logic. This is what makes the course build one coherent system instead of a pile of one-off scripts: later chapters write modules here, and still-later chapters `import` them. Your Airflow DAG will import the same ingest function you wrote by hand, not a copy of it.
 - **`config/`** holds non-secret service configuration (the settings files each service reads). It gets populated as you add services.
 - **`pipelines/`** is where your Spark Declarative Pipelines project lives. You won't hand-build its internal structure: in the Transformation chapter you'll run `spark-pipelines init --name <project>`, which scaffolds a `spark-pipeline.yml` spec and a `transformations/` folder. For now it's an empty home.
-- **`dags/`** holds Airflow DAGs (Chapter 9); they stay thin and import from `lakehouse/`.
-- **`ml/`** holds model training code (Chapter 11).
+- **`dags/`** holds Airflow DAGs (Chapter 10); they stay thin and import from `lakehouse/`.
+- **`ml/`** holds model training code (Chapter 12).
 - **`data/`** is local scratch space for anything you don't want committed.
 - **`tests/`** holds a few real tests, because production code gets tested.
-- `docker-compose.yml` (your infrastructure) lives at the project root; you create it in the next chapter with the first service.
+- `docker-compose.yml` (your infrastructure) lives at the project root; you create it in Chapter 4 with the first service.
 
 Make `lakehouse` an installable package so `import lakehouse` works from anywhere, your DAGs, your training scripts, an interactive shell. Create a `pyproject.toml` at the root:
 
@@ -139,7 +139,7 @@ build-backend = "setuptools.build_meta"
 packages = ["lakehouse"]
 ```
 
-Three pins in it are deliberate. `requires-python` admits only 3.12, so `pip install -e .` on any other Python stops with `Package 'lakehouse' requires a different Python` instead of building an environment whose cluster-side code fails later. `pyspark[connect]==4.3.0` is exactly the Spark version of the server you start in Chapter 4. And `pandas<3` keeps pandas on the 2.x line, because PySpark 4.3 does not fully support pandas 3 yet and warns when it finds it.
+Three pins in it are deliberate. `requires-python` admits only 3.12, so `pip install -e .` on any other Python stops with `Package 'lakehouse' requires a different Python` instead of building an environment whose cluster-side code fails later. `pyspark[connect]==4.3.0` is exactly the Spark version of the server you start in Chapter 5. And `pandas<3` keeps pandas on the 2.x line, because PySpark 4.3 does not fully support pandas 3 yet and warns when it finds it.
 
 Before installing anything, give the project its own Python environment. A **virtual environment** is a private copy of the Python package directory that belongs to this one project, so the course's packages never collide with your system's or another project's. It's also not optional on current Linux distributions: Ubuntu 24.04 and Debian 12 mark the system Python as "externally managed" (PEP 668), and a plain `pip install` there fails with `error: externally-managed-environment`. Create the environment once and activate it in every new terminal you open for this project:
 
@@ -157,7 +157,7 @@ pip install -e .
 python -c "import lakehouse, pyspark; print('ok', pyspark.__version__)"   # -> ok 4.3.0
 ```
 
-Why `pyspark[connect]` and not just `pyspark`? The bare package installs the Spark libraries but not the Spark Connect client's dependencies (pandas, PyArrow, and gRPC). Without them the first `SparkSession.builder.remote(...)` call in Chapter 4 fails with `PySparkImportError: [PACKAGE_NOT_INSTALLED] Pandas >= 2.2.0 must be installed`. The `[connect]` extra pulls them in.
+Why `pyspark[connect]` and not just `pyspark`? The bare package installs the Spark libraries but not the Spark Connect client's dependencies (pandas, PyArrow, and gRPC). Without them the first `SparkSession.builder.remote(...)` call in Chapter 5 fails with `PySparkImportError: [PACKAGE_NOT_INSTALLED] Pandas >= 2.2.0 must be installed`. The `[connect]` extra pulls them in.
 
 That editable install is the small move that makes everything downstream cohere: once `lakehouse` is on your path, every chapter's code (and your DAGs, and your tests) imports the same functions instead of re-pasting them. We'll create the actual `docker-compose.yml` in the next chapter, when there's a first service to put in it.
 
@@ -237,13 +237,13 @@ You're ready to move on when:
 
 ## Recap and what's next
 
-- The only tools on your host are **Docker (with Compose), Python, Git, and the AWS CLI**; everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
+- The only tools on your host are **Docker (with Compose), Python, Git, and the AWS CLI** (plus Ollama for the agent's model, in Chapter 3); everything else runs in containers. Plan for around 16 GB of RAM to run the full stack comfortably.
 - Services run as **containers defined in a Compose file**, which is your infrastructure written down: readable, versioned, reproducible.
 - Secrets live in a gitignored **`.env`**, and keeping them out of version control is the first habit you commit.
 - Python work happens inside a project virtual environment (`source .venv/bin/activate`), which keeps the course's packages isolated and sidesteps PEP 668 on modern Linux.
 - You confirmed Docker can pull and run a container, and laid out an installable `lakehouse` project ready for its first real service and its first shared module.
-- **Next, Chapter 3, Storage:** create your first real service, an S3-compatible object store, in the `docker-compose.yml` you'll start for real, and set up the warehouse it holds.
+- **Next, Chapter 3, Agentic data engineering:** define the agent that writes pipelines in this lakehouse, on a local model, and the policies that decide what it may do, before there is anything for it to touch.
 
-![Progress: Setup complete, Storage next](../figures/ch02/fig-2.7-progress-setup-done.svg)
+![Progress: Setup complete, the agent next](../figures/ch02/fig-2.7-progress-setup-done.svg)
 
-**Figure 2.7**. Progress map with **Setup ✓** and **Storage** highlighted next.
+**Figure 2.7**. Progress map with **Setup ✓** and **Agent & policies** highlighted next.

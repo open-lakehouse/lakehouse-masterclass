@@ -20,14 +20,14 @@ connector 4.3.0 is the only `spark.jars.packages` entry. PySpark client 4.3.0 wi
 
 Changes that came with it: deterministic Silver dedup (window, not `dropDuplicates`),
 `spark.sql.session.timeZone UTC` on the server, SDP storage on
-`s3a://lakehouse/_pipelines/medallion`, new DAGs paused at creation (Chapter 9
-unpauses), and Chapter 9's section on overlapping refreshes, built from
+`s3a://lakehouse/_pipelines/medallion`, new DAGs paused at creation (Chapter 10
+unpauses), and Chapter 10's section on overlapping refreshes, built from
 `data/race.sh` and its log.
 
 ## Runtime verification, 2026-10-12
 
 The whole course was followed as a student, chapter by chapter, on a Linux host with
-Docker (16 cores, 156 GB RAM), and every code block in Chapters 2 to 13 was run. The
+Docker (16 cores, 156 GB RAM), and every code block in the chapters then numbered 2 to 13 (now 2 and 4 to 14) was run. The
 chapters were then corrected to match what actually works. Versions verified:
 Spark 4.1.0 (Connect), Iceberg 1.12.0, hadoop-aws 3.4.2, Unity Catalog v0.7.0,
 Kafka (Confluent 7.5.0), Airflow 3.3.2, MLflow 3.1.0, DuckDB 1.5.6, PySpark client
@@ -43,7 +43,7 @@ every check passed with no other changes.
 Unity Catalog: the first pass used an image built from the `v0.7.0` source tag. The
 official `unitycatalog/unitycatalog:v0.7.0` image (published 2026-10-14, amd64 and
 arm64, same commit `2b17f3b5`) was then swapped in and the course replayed from an
-empty stack on 2026-10-14: catalog creation, Chapter 5's create, insert, schema
+empty stack on 2026-10-14: catalog creation, Chapter 6's create, insert, schema
 evolution, delete, time travel and rollback, ingest, the medallion on repeated runs
 (Gold for 2026-01-05 matches the book exactly), streaming dedup, an Airflow run,
 DuckDB matching Spark row for row, MLflow train and register, and data surviving
@@ -71,16 +71,16 @@ planned work, and each has an issue:
 
 - **#6** Restore the Iceberg metadata-table queries (`.snapshots`, `.files`,
   `.history`) once a Unity Catalog release includes unitycatalog/unitycatalog#1984.
-  The fix was merged 2026-10-23; 0.7.0 is still the latest release. Chapters 5 and 11
+  The fix was merged 2026-10-23; 0.7.0 is still the latest release. Chapters 6 and 12
   explain the limitation and use `lakehouse/catalog.py`, `SHOW TBLPROPERTIES` and the
   `_file` column meanwhile.
-- **#7** Relax Chapter 7's "`select`, not `withColumn`" rule once a Spark release fixes
+- **#7** Relax Chapter 8's "`select`, not `withColumn`" rule once a Spark release fixes
   SPARK-59663 (fix under review in apache/spark#59100). Reproduced on stock Spark
   4.1.0 through 4.3.0; the fix is not in v4.3.0.
 - **#8** Drop the Iceberg build stage in `docker/spark/Dockerfile` once
   `iceberg-spark-runtime-4.3_2.13` is on Maven Central: it becomes one entry in
-  `spark.jars.packages`, and Chapter 4's Step 1a shrinks to match. (Also recheck
-  whether a newer MLflow image ships `boto3`; `v3.1.0` doesn't, so Chapter 11 builds
+  `spark.jars.packages`, and Chapter 5's Step 1a shrinks to match. (Also recheck
+  whether a newer MLflow image ships `boto3`; `v3.1.0` doesn't, so Chapter 12 builds
   a two-line image.)
 - **#9** The companion code repository with a git tag per chapter, described as
   planned in `COURSE.md`.

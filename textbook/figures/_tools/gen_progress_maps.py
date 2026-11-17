@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate per-chapter progress-map SVGs with consistent styling.
 
-Each map shows the 11 milestones (Foundations + 10 layers). A milestone is:
+Each map shows the course's milestones: Foundations, Setup, the agent and its
+policies (Chapter 3), and the layers of the stack. A milestone is:
   - "done"    -> green with a check
   - "current" -> amber, "you are here"
   - "todo"    -> dimmed slate
@@ -10,7 +11,7 @@ Usage: python3 gen_progress_maps.py   (writes fig-N.M-progress-*.svg files)
 """
 
 MILESTONES = [
-    "Foundations", "Setup", "Storage", "Compute", "Tables &\nCatalog",
+    "Foundations", "Setup", "Agent &\npolicies", "Storage", "Compute", "Tables &\nCatalog",
     "Ingestion", "Transform", "Streaming", "Orchestr.", "Serving", "AI", "Agents",
 ]
 
@@ -51,8 +52,8 @@ def build(current_index, done_through_index, title):
     """done_through_index: milestones with index < this are 'done'."""
     W, H = 1280, 300
     title = title.replace("&", "&amp;")
-    cols = 6
-    cw, ch, gap = 180, 62, 14
+    cols = 7
+    cw, ch, gap = 160, 62, 14
     x0, y0 = 40, 96
     svg = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" '
            'font-family="Inter, Segoe UI, Helvetica, Arial, sans-serif">',
@@ -72,29 +73,31 @@ def build(current_index, done_through_index, title):
 TARGETS = [
     # (chapter_dir, filename, current_index, done_through_index, title)
     ("ch02", "fig-2.1-progress-setup.svg", 1, 1, "Progress: building Setup"),
-    ("ch02", "fig-2.7-progress-setup-done.svg", 2, 2, "Progress: Setup complete, Storage next"),
-    ("ch03", "fig-3.1-progress-storage.svg", 2, 2, "Progress: building Storage"),
-    ("ch03", "fig-3.7-progress-storage-done.svg", 3, 3, "Progress: Storage complete, Compute next"),
-    ("ch04", "fig-4.1-progress-compute.svg", 3, 3, "Progress: building Compute"),
-    ("ch04", "fig-4.5-progress-compute-done.svg", 4, 4, "Progress: Compute complete, Tables next"),
-    ("ch05", "fig-5.1-progress-tables.svg", 4, 4, "Progress: building Tables and Catalog"),
-    ("ch05", "fig-5.4-progress-tables-done.svg", 5, 5, "Progress: Tables complete, Ingestion next"),
-    ("ch06", "fig-6.1-progress-ingestion.svg", 5, 5, "Progress: building Ingestion"),
-    ("ch06", "fig-6.3-progress-ingestion-done.svg", 6, 6, "Progress: Ingestion complete, Transformation next"),
-    ("ch07", "fig-7.1-progress-transform.svg", 6, 6, "Progress: building Transformation"),
-    ("ch07", "fig-7.4-progress-transform-done.svg", 7, 7, "Progress: Transformation complete, Streaming next"),
-    ("ch08", "fig-8.1-progress-streaming.svg", 7, 7, "Progress: building Streaming"),
-    ("ch08", "fig-8.3-progress-streaming-done.svg", 8, 8, "Progress: Streaming complete, Orchestration next"),
-    ("ch09", "fig-9.1-progress-orchestration.svg", 8, 8, "Progress: building Orchestration"),
-    ("ch09", "fig-9.3-progress-orchestration-done.svg", 9, 9, "Progress: Orchestration complete, Serving next"),
-    ("ch10", "fig-10.1-progress-serving.svg", 9, 9, "Progress: building Serving"),
-    ("ch10", "fig-10.3-progress-serving-done.svg", 10, 10, "Progress: Serving complete, AI next"),
-    ("ch11", "fig-11.1-progress-ai.svg", 10, 10, "Progress: building AI"),
-    ("ch11", "fig-11.3-progress-ai-done.svg", 11, 11, "Progress: AI complete, Agents next"),
-    ("ch12", "fig-12.1-progress-agents.svg", 11, 11, "Progress: building Agents"),
-    ("ch12", "fig-12.3-progress-agents-done.svg", 12, 12, "Progress: Agents complete, Deploy next"),
-    ("ch13", "fig-13.1-progress-complete.svg", -1, 12, "Progress: every layer built"),
-    ("ch13", "fig-13.3-progress-complete.svg", -1, 12, "Your open lakehouse, complete"),
+    ("ch02", "fig-2.7-progress-setup-done.svg", 2, 2, "Progress: Setup complete, the agent next"),
+    ("ch03", "fig-3.1-progress-agent.svg", 2, 2, "Progress: defining the agent and its policies"),
+    ("ch03", "fig-3.3-progress-agent-done.svg", 3, 3, "Progress: the agent is defined, Storage next"),
+    ("ch04", "fig-4.1-progress-storage.svg", 3, 3, "Progress: building Storage"),
+    ("ch04", "fig-4.7-progress-storage-done.svg", 4, 4, "Progress: Storage complete, Compute next"),
+    ("ch05", "fig-5.1-progress-compute.svg", 4, 4, "Progress: building Compute"),
+    ("ch05", "fig-5.5-progress-compute-done.svg", 5, 5, "Progress: Compute complete, Tables next"),
+    ("ch06", "fig-6.1-progress-tables.svg", 5, 5, "Progress: building Tables and Catalog"),
+    ("ch06", "fig-6.4-progress-tables-done.svg", 6, 6, "Progress: Tables complete, Ingestion next"),
+    ("ch07", "fig-7.1-progress-ingestion.svg", 6, 6, "Progress: building Ingestion"),
+    ("ch07", "fig-7.3-progress-ingestion-done.svg", 7, 7, "Progress: Ingestion complete, Transformation next"),
+    ("ch08", "fig-8.1-progress-transform.svg", 7, 7, "Progress: building Transformation"),
+    ("ch08", "fig-8.4-progress-transform-done.svg", 8, 8, "Progress: Transformation complete, Streaming next"),
+    ("ch09", "fig-9.1-progress-streaming.svg", 8, 8, "Progress: building Streaming"),
+    ("ch09", "fig-9.3-progress-streaming-done.svg", 9, 9, "Progress: Streaming complete, Orchestration next"),
+    ("ch10", "fig-10.1-progress-orchestration.svg", 9, 9, "Progress: building Orchestration"),
+    ("ch10", "fig-10.3-progress-orchestration-done.svg", 10, 10, "Progress: Orchestration complete, Serving next"),
+    ("ch11", "fig-11.1-progress-serving.svg", 10, 10, "Progress: building Serving"),
+    ("ch11", "fig-11.3-progress-serving-done.svg", 11, 11, "Progress: Serving complete, AI next"),
+    ("ch12", "fig-12.1-progress-ai.svg", 11, 11, "Progress: building AI"),
+    ("ch12", "fig-12.3-progress-ai-done.svg", 12, 12, "Progress: AI complete, Agents next"),
+    ("ch13", "fig-13.1-progress-agents.svg", 12, 12, "Progress: building Agents"),
+    ("ch13", "fig-13.3-progress-agents-done.svg", 13, 13, "Progress: Agents complete, Deploy next"),
+    ("ch14", "fig-14.1-progress-complete.svg", -1, 13, "Progress: every layer built"),
+    ("ch14", "fig-14.3-progress-complete.svg", -1, 13, "Your open lakehouse, complete"),
 ]
 
 if __name__ == "__main__":

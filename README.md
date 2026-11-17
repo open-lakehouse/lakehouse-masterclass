@@ -27,7 +27,7 @@ This is for you if you can write a bit of **Python** and **SQL**, are comfortabl
 
 You do **not** need to already know Spark, Docker internals, Kafka, or distributed systems. Every concept gets defined the moment you need it, right before you build the thing that uses it. Tools serve the idea here, never the other way around.
 
-**What you'll need:** a laptop with about 16 GB of RAM, Docker, and a willingness to run real infrastructure locally. With every service up, the stack used about 4.5 GB of container memory after a pipeline run when we verified the course, with brief peaks above that while a job runs. 8 GB can work if you cap the Spark worker (Chapter 4 shows how) and keep Airflow and MLflow stopped until their chapters. Everything runs on your machine and tears down with a single command when you're done, so you get your machine back with no leftover mess.
+**What you'll need:** a laptop with about 16 GB of RAM, Docker, and a willingness to run real infrastructure locally. With every service up, the stack used about 4.5 GB of container memory after a pipeline run when we verified the course, with brief peaks above that while a job runs. 8 GB can work if you cap the Spark worker (Chapter 5 shows how) and keep Airflow and MLflow stopped until their chapters. Everything runs on your machine and tears down with a single command when you're done, so you get your machine back with no leftover mess.
 
 ---
 
@@ -43,26 +43,27 @@ Start here → **[textbook/README.md](textbook/README.md)**, then read **[textbo
 
 ## 🗺️ The curriculum
 
-You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Thirteen chapters plus a short, temporary Chapter 4.5 (the Iceberg runtime for Spark 4.3), ten layers of the stack (Chapters 3 to 12), one working system.
+You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Fourteen chapters plus a short, temporary Chapter 5.5 (the Iceberg runtime for Spark 4.3): first the agent that will work in the lakehouse and the policies that gate it (Chapter 3), then ten layers of the stack (Chapters 4 to 13), one working system.
 
 | # | Chapter | The layer you build | The payoff |
 |---|---------|--------------------|------------|
 | 1 | **Foundations** | *(the map)* | Understand what a lakehouse is, and make the handful of architecture decisions that are expensive to get wrong before you write any code. |
 | 2 | **Setup** | Your environment, from scratch | Install the tools, lay out the project, and learn the container, networking, and secrets model the whole stack runs on. |
-| 3 | **Storage** | Object store + open table format | Stand up your first real service (SeaweedFS), and learn how loose Parquet files become a *table*. Meet Iceberg. |
-| 4 | **Compute** | Apache Spark, via **Spark Connect** | Build the course's Spark image and drive a real Spark cluster from a tiny client over `sc://`, no heavyweight driver bolted to your app. |
-| 4.5 | **Iceberg for Spark 4.3** | The Iceberg runtime, built from source | A short, temporary chapter: no Iceberg release ships a Spark 4.3 runtime yet, so you build it from a pinned commit. It goes away when the release does. |
-| 5 | **Tables & Catalog** | Iceberg through **Unity Catalog OSS** | Create a real transactional table, evolve its schema, then *time-travel* and roll back a mistake. ✨ |
-| 6 | **Ingestion** | Landing raw data → **Bronze** | Load data the modern way (ELT), and make it safely re-runnable so retries never duplicate rows. |
-| 7 | **Transformation** | The **medallion** with Spark Declarative Pipelines | Declare Bronze→Silver→Gold and let the engine figure out the order, the refresh, and the quality checks. |
-| 8 | **Streaming** | Kafka → Structured Streaming → Bronze | The *same* table, now fed in real time, with watermarks and exactly-once dedup done honestly. |
-| 9 | **Orchestration** | An **Airflow** DAG | Put the pipeline on a schedule with retries and backfills, so it runs itself while you sleep. |
-| 10 | **Serving** | One open catalog, many engines | Query the *exact same* tables from a totally different engine, no copies, no exports. This is the payoff of "open." |
-| 11 | **AI** | Train + track a model with **MLflow** | Feed your clean Gold tables to a model, and log *which snapshot* trained it, so the result is fully reproducible. |
-| 12 | **Agents** | An LLM that *operates* the lakehouse | Ask, in plain English, for the pipeline to run, and watch an agent actually do it. 🤖 |
-| 13 | **Deploy & Teardown** | Cloud path + a clean exit | Tour the road to the cloud (without a bill), then tear it all down and see where to go next. |
+| 3 | **Agentic data engineering** | An SDP agent on a local model, and its policies | Define the agent that writes pipelines in your lakehouse (Omnigent + Ollama + MCP tools) and the policies that ALLOW, DENY, or ASK about every tool call, tested before it can touch anything. |
+| 4 | **Storage** | Object store + open table format | Stand up your first real service (SeaweedFS), and learn how loose Parquet files become a *table*. Meet Iceberg. |
+| 5 | **Compute** | Apache Spark, via **Spark Connect** | Build the course's Spark image and drive a real Spark cluster from a tiny client over `sc://`, no heavyweight driver bolted to your app. |
+| 5.5 | **Iceberg for Spark 4.3** | The Iceberg runtime, built from source | A short, temporary chapter: no Iceberg release ships a Spark 4.3 runtime yet, so you build it from a pinned commit. It goes away when the release does. |
+| 6 | **Tables & Catalog** | Iceberg through **Unity Catalog OSS** | Create a real transactional table, evolve its schema, then *time-travel* and roll back a mistake. ✨ |
+| 7 | **Ingestion** | Landing raw data → **Bronze** | Load data the modern way (ELT), and make it safely re-runnable so retries never duplicate rows. |
+| 8 | **Transformation** | The **medallion** with Spark Declarative Pipelines | Declare Bronze→Silver→Gold and let the engine figure out the order, the refresh, and the quality checks. |
+| 9 | **Streaming** | Kafka → Structured Streaming → Bronze | The *same* table, now fed in real time, with watermarks and exactly-once dedup done honestly. |
+| 10 | **Orchestration** | An **Airflow** DAG | Put the pipeline on a schedule with retries and backfills, so it runs itself while you sleep. |
+| 11 | **Serving** | One open catalog, many engines | Query the *exact same* tables from a totally different engine, no copies, no exports. This is the payoff of "open." |
+| 12 | **AI** | Train + track a model with **MLflow** | Feed your clean Gold tables to a model, and log *which snapshot* trained it, so the result is fully reproducible. |
+| 13 | **Agents** | An LLM that *operates* the lakehouse | Ask, in plain English, for the pipeline to run, and watch an agent actually do it. 🤖 |
+| 14 | **Deploy & Teardown** | Cloud path + a clean exit | Tour the road to the cloud (without a bill), then tear it all down and see where to go next. |
 
-**The stack you'll come out knowing:** SeaweedFS · Apache Spark (Spark Connect) · Apache Iceberg · Unity Catalog OSS · Apache Kafka · Apache Airflow · Spark Declarative Pipelines · MLflow.
+**The stack you'll come out knowing:** Omnigent and Ollama (the agent) · SeaweedFS · Apache Spark (Spark Connect) · Apache Iceberg · Unity Catalog OSS · Apache Kafka · Apache Airflow · Spark Declarative Pipelines · MLflow.
 
 And here's the quiet secret: **these are the same open tools the big paid platforms are built on.** Learn them here, directly, and moving to something like Databricks or EMR later is a small step. You'll already know what's under the hood.
 
