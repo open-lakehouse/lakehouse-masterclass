@@ -69,15 +69,16 @@ nav:
   - Home: index.md
   - "1. Foundations": chapters/ch01-foundations.md
   - "2. Setup": chapters/ch02-setup.md
-  - "3. Storage": chapters/ch03-storage.md
-  - "4. Compute": chapters/ch04-compute.md
-  - "4.5. Iceberg for Spark 4.3": chapters/ch04-5-iceberg-runtime.md
-  - "5. Tables and Catalog": chapters/ch05-tables-catalog.md
-  - "6. Ingestion": chapters/ch06-ingestion.md
-  - "7. Transformation": chapters/ch07-transformation.md
-  - "8. Streaming": chapters/ch08-streaming.md
-  - "9. Orchestration": chapters/ch09-orchestration.md
-  - "10. Serving": chapters/ch10-serving.md
-  - "11. AI": chapters/ch11-ai.md
-  - "12. Agents": chapters/ch12-agents.md
-  - "13. Deploy and Teardown": chapters/ch13-deploy-teardown.md
+  - "3. Agentic data engineering": chapters/ch03-agentic-data-engineering.md
+  - "4. Storage": chapters/ch04-storage.md
+  - "5. Compute": chapters/ch05-compute.md
+  - "5.5. Iceberg for Spark 4.3": chapters/ch05-5-iceberg-runtime.md
+  - "6. Tables and Catalog": chapters/ch06-tables-catalog.md
+  - "7. Ingestion": chapters/ch07-ingestion.md
+  - "8. Transformation": chapters/ch08-transformation.md
+  - "9. Streaming": chapters/ch09-streaming.md
+  - "10. Orchestration": chapters/ch10-orchestration.md
+  - "11. Serving": chapters/ch11-serving.md
+  - "12. AI": chapters/ch12-ai.md
+  - "13. Agents": chapters/ch13-agents.md
+  - "14. Deploy and Teardown": chapters/ch14-deploy-teardown.md

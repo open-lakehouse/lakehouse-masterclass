@@ -1,4 +1,4 @@
-# The sessions job survives a crash (Chapter 8, "Stateful streaming: one row per customer
+# The sessions job survives a crash (Chapter 9, "Stateful streaming: one row per customer
 # visit", Steps 8 to 10). Storyboard: storyboard.md.
 # One take is one continuous run: the producer and the job keep running between beats in
 # tmux panes on their own server, and every clip attaches to it. So never --only a beat;

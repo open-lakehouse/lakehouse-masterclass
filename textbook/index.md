@@ -18,6 +18,7 @@ You are comfortable with a terminal, you can read Python and SQL, and you want t
 
 One growing project, on one machine, using open standards the whole way down:
 
+- **An agent first**: a Spark Declarative Pipelines agent on a local model, in Omnigent, with policies you write and test before it touches anything
 - **Storage** on an S3-compatible object store (SeaweedFS), with Apache Iceberg as the open table format
 - **Compute** with Apache Spark, driven over Spark Connect
 - **Tables and a catalog** with Unity Catalog's Iceberg REST catalog
@@ -32,18 +33,19 @@ Read them in order. Each one builds a layer on top of the last.
 
 1. [Foundations](chapters/ch01-foundations.md): the decisions that are expensive to get wrong
 2. [Setup](chapters/ch02-setup.md): the environment, from scratch, with Docker Compose
-3. [Storage](chapters/ch03-storage.md): the object store and the open table format
-4. [Compute](chapters/ch04-compute.md): Spark, and why Spark Connect
-    - 4.5 [Iceberg for Spark 4.3](chapters/ch04-5-iceberg-runtime.md): the Iceberg runtime, built from source until it's released
-5. [Tables and Catalog](chapters/ch05-tables-catalog.md): Iceberg tables through Unity Catalog
-6. [Ingestion](chapters/ch06-ingestion.md): landing raw data into Bronze
-7. [Transformation](chapters/ch07-transformation.md): the medallion with Spark Declarative Pipelines
-8. [Streaming](chapters/ch08-streaming.md): Kafka into the same tables, and per-customer state with transformWithState
-9. [Orchestration](chapters/ch09-orchestration.md): scheduling the pipeline with Airflow
-10. [Serving](chapters/ch10-serving.md): one catalog, many engines
-11. [AI](chapters/ch11-ai.md): training and tracking a model on the lakehouse
-12. [Agents](chapters/ch12-agents.md): an agent that operates the stack
-13. [Deploy and Teardown](chapters/ch13-deploy-teardown.md): where to go next
+3. [Agentic data engineering](chapters/ch03-agentic-data-engineering.md): the agent that writes pipelines here, and the policies that gate it
+4. [Storage](chapters/ch04-storage.md): the object store and the open table format
+5. [Compute](chapters/ch05-compute.md): Spark, and why Spark Connect
+    - 5.5 [Iceberg for Spark 4.3](chapters/ch05-5-iceberg-runtime.md): the Iceberg runtime, built from source until it's released
+6. [Tables and Catalog](chapters/ch06-tables-catalog.md): Iceberg tables through Unity Catalog
+7. [Ingestion](chapters/ch07-ingestion.md): landing raw data into Bronze
+8. [Transformation](chapters/ch08-transformation.md): the medallion with Spark Declarative Pipelines
+9. [Streaming](chapters/ch09-streaming.md): Kafka into the same tables, and per-customer state with transformWithState
+10. [Orchestration](chapters/ch10-orchestration.md): scheduling the pipeline with Airflow
+11. [Serving](chapters/ch11-serving.md): one catalog, many engines
+12. [AI](chapters/ch12-ai.md): training and tracking a model on the lakehouse
+13. [Agents](chapters/ch13-agents.md): an agent that operates the stack
+14. [Deploy and Teardown](chapters/ch14-deploy-teardown.md): where to go next
 
 ---
 

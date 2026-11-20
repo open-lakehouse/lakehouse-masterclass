@@ -1,6 +1,6 @@
 # Animation: an Iceberg commit is one atomic swap of the table's metadata pointer in the catalog
 
-**Claim.** An Iceberg commit is one atomic swap of the table's metadata pointer in the catalog, which is why time travel, rollback and write-audit-publish are cheap. Literal version on screen: the atomic step is the catalog (Unity Catalog's Iceberg REST endpoint) swapping `metadata-location` to a new `metadata.json`; `current-snapshot-id` is a field inside that file, not a pointer of its own. For the course textbook (Chapter 5, tables and catalog).
+**Claim.** An Iceberg commit is one atomic swap of the table's metadata pointer in the catalog, which is why time travel, rollback and write-audit-publish are cheap. Literal version on screen: the atomic step is the catalog (Unity Catalog's Iceberg REST endpoint) swapping `metadata-location` to a new `metadata.json`; `current-snapshot-id` is a field inside that file, not a pointer of its own. For the course textbook (Chapter 6, tables and catalog).
 
 **Numbers.** `data.json`. Every behaviour shown was verified on the course stack (Spark 4.3.0, Iceberg built from apache/iceberg#18749, Unity Catalog 0.7.0) on 2026-11-06. On screen the WAP beat says only "main is unchanged" and "+1 row" (the check had main at 5 rows, branch at 6; absolute counts are not shown because the earlier snapshots are illustrative). Metadata versions, snapshot labels, file counts, the branch name `audit` and all timing are schematic, labelled on screen.
 

@@ -1,4 +1,4 @@
-# The refresh race (Chapter 9, "Two runs at once"): two refreshes of the medallion
+# The refresh race (Chapter 10, "Two runs at once"): two refreshes of the medallion
 # pipeline at once, both COMPLETED, Silver doubled. Storyboard: storyboard.md.
 #   film render textbook/media/film/refresh-race/refresh-race.tape --demo <course project> [--format vertical]
 # Every render runs the race for real: restore Silver and Gold with one pipeline run
@@ -19,7 +19,7 @@ Show
 
 # beat: before | Silver and Gold before
 Sleep 600ms
-Type "# Chapter 9: one pipeline, two ways to start it. First, the healthy state:" Enter
+Type "# Chapter 10: one pipeline, two ways to start it. First, the healthy state:" Enter
 Type "# Silver's rows, its distinct order ids, and Gold's summed order_count" Enter
 Sleep 400ms
 Type "python -c "

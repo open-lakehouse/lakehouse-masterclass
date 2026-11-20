@@ -1,6 +1,6 @@
 # Film: the refresh race (terminal)
 
-**Story.** Chapter 9, "Two runs at once: the refresh race". Two refreshes of the same
+**Story.** Chapter 10, "Two runs at once: the refresh race". Two refreshes of the same
 Spark Declarative Pipeline started together (what a scheduled run plus a manual run
 amount to) both report `Run is COMPLETED`, while Silver ends up with every order twice
 and Gold's `order_count` sums to more again. Silver's commit log, read from Unity
@@ -8,7 +8,7 @@ Catalog's Iceberg REST endpoint, shows why: delete, delete, append, append. The 
 follow the chapter section in order; nothing in the film is staged, the race runs live
 against the dev stack.
 
-**Tape:** `refresh-race.tape`. **Needs:** a checkout of the finished course project (the code from every chapter, Chapter 13's tree) with
+**Tape:** `refresh-race.tape`. **Needs:** a checkout of the finished course project (the code from every chapter, Chapter 14's tree) with
 seaweedfs, spark-master, spark-worker, spark-connect and unity-catalog up, and Silver
 and Gold freshly refreshed by one run on its own (Silver = distinct ids = Gold sum).
 Render with `--demo <that checkout>`. Every render runs the

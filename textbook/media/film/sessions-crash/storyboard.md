@@ -1,6 +1,6 @@
 # Film: the sessions job survives a crash (terminal)
 
-**Story.** Chapter 8, "Stateful streaming: one row per customer visit", Steps 8 to 10.
+**Story.** Chapter 9, "Stateful streaming: one row per customer visit", Steps 8 to 10.
 The producer runs in one terminal and `lakehouse/customer_sessions.py` (transformWithState,
 one row per customer visit) in a second. A minute later the Gold table holds finished
 visits; the `statestore` data source shows the visits still open (the `visit` value
@@ -9,7 +9,7 @@ spark-connect` under the running query, the client dies, the same command starts
 again on the same checkpoint, and a minute later rows equal distinct visits. The beats
 follow the chapter's steps in order, live against the dev stack.
 
-**Tape:** `sessions-crash.tape`. **Needs:** a checkout of the finished course project (the code from every chapter, Chapter 13's tree) with
+**Tape:** `sessions-crash.tape`. **Needs:** a checkout of the finished course project (the code from every chapter, Chapter 14's tree) with
 seaweedfs, spark-master, spark-worker, spark-connect, unity-catalog, zookeeper and kafka
 up. `film-setup.sh <format>` resets the sessions table and checkpoint (as
 `data/replay-ch8.sh` does) and builds three tmux panes on their own server (producer,
