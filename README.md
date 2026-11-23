@@ -1,98 +1,109 @@
-# 🏠 Build Your First Open Lakehouse, from Storage to Agents
+# 🏠 Build Your First Open Lakehouse
 
-![Build Your First Open Lakehouse, from Storage to Agents](banner.jpg)
+A lakehouse is easy to draw and hard to understand until every box has failed in front of you at least once.
 
-**Everybody talks about the "modern data stack." This course makes you build one, the whole thing, on your own machine.**
+Build Your First Open Lakehouse is a practical course that turns the architecture diagram into a system running on one machine. Starting with an empty directory, it builds object storage, Apache Spark, Apache Iceberg, an open catalog, batch and streaming pipelines, orchestration, serving, machine learning, and a policy-constrained agent. No cloud account and no managed service hides the joins between the layers.
 
-No cloud account. No credit card. No mystery managed service doing the interesting parts for you behind a paywall. Just you, your machine, and a stack of real, production-grade open-source tools that you wire together one layer at a time until you have a living data lakehouse that does batch, streaming, AI, and can even be driven by an AI agent at the end.
+![Course architecture and title](banner.jpg)
 
-By the last chapter, the intimidating architecture diagram you see in every data-engineering blog post won't be intimidating anymore. It'll be *yours*. You'll have typed every command that built it, and you'll understand every layer well enough to defend the choices to your team.
+The finish line is not “all containers are green.” It is one order stream that can be ingested twice without duplication, transformed into tested Silver and Gold tables, resumed from a streaming checkpoint, backfilled through Airflow, queried from a second engine, tied to the snapshot that trained a model, and operated through explicit agent policies.
 
----
+**[Read the course](https://open-lakehouse.github.io/lakehouse-masterclass/)** · **[Start Chapter 1](textbook/chapters/ch01-foundations.md)** · **[See every command and checkpoint](COURSE.md)**
 
-## Wait, what's a "lakehouse," and why should I care?
+## 🏗️ One system, layer by layer
 
-For years you had to pick between two bad options.
+The course develops one system from the infrastructure upward. A stream of order events moves through object storage, Apache Iceberg tables, batch and streaming pipelines, orchestration, serving, and model training. Later chapters add an agent with explicit policies for operating the stack.
 
-- A **data warehouse**: reliable and fast, but closed, proprietary, and expensive. Your data lives in *their* box, readable only by *their* engine.
-- A **data lake**: cheap and open, just files in storage, but with no transactions, no reliable schema, no guarantees. It tends to rot into a "data swamp."
+The completed stack uses:
 
-A **lakehouse** refuses to choose. You keep your data as cheap open files in object storage, then add an **open table format** (Apache Iceberg) on top that gives you warehouse-grade guarantees: ACID transactions, schema evolution, and *time travel* (yes, you can query your table as it looked last Tuesday, or roll back a bad delete). Open format, cheap storage, warehouse guarantees. That's the whole idea, and you're going to build it from the ground up.
+- SeaweedFS for S3-compatible object storage
+- Apache Spark through Spark Connect for compute
+- Apache Iceberg and Unity Catalog OSS for tables and catalog metadata
+- Apache Kafka and Structured Streaming for real-time ingestion
+- Spark Declarative Pipelines for transformation
+- Apache Airflow for orchestration
+- DuckDB for an independent serving engine
+- MLflow for experiment and model tracking
+- Omnigent and Ollama for local agent-driven operations
 
----
-
-## Who this is for
-
-This is for you if you can write a bit of **Python** and **SQL**, are comfortable in a **terminal**, and want to actually stand up a lakehouse rather than read about one. Maybe you've been handed the job of building one for your team, or maybe you're just tired of tutorials that stop at "and then the platform handles the rest." Either way, this course walks you through the real architecture decisions and the real infrastructure, from the seat of the engineer who has to make it work.
-
-You do **not** need to already know Spark, Docker internals, Kafka, or distributed systems. Every concept gets defined the moment you need it, right before you build the thing that uses it. Tools serve the idea here, never the other way around.
-
-**What you'll need:** a laptop with about 16 GB of RAM, Docker, and a willingness to run real infrastructure locally. With every service up, the stack used about 4.5 GB of container memory after a pipeline run when we verified the course, with brief peaks above that while a job runs. 8 GB can work if you cap the Spark worker (Chapter 5 shows how) and keep Airflow and MLflow stopped until their chapters. Everything runs on your machine and tears down with a single command when you're done, so you get your machine back with no leftover mess.
-
----
-
-## How the course works
-
-The whole thing is written as a **textbook**: read it front to back, one chapter at a time. You build the lakehouse **from scratch**, no magic setup script and no repo to clone. Each chapter adds **one service** to a Docker Compose file you write yourself, so the system grows under your hands and you understand every piece of it. We follow a single story throughout: a stream of realistic **order events** that you ingest, clean, aggregate, schedule, serve, learn from, and eventually hand off to an agent.
-
-[`COURSE.md`](COURSE.md) is the quick reference: for each chapter, the commands you run and the checkpoint that proves the layer works. A companion code repository with a git tag per chapter is planned; until it exists, the chapters themselves contain every file in full.
-
-Start here → **[textbook/README.md](textbook/README.md)**, then read **[textbook/chapters/](textbook/chapters/)** in order.
-
----
-
-## 🗺️ The curriculum
-
-You build the lakehouse **bottom-up**, because you can't transform data before you can store and compute it. Fourteen chapters plus a short, temporary Chapter 5.5 (the Iceberg runtime for Spark 4.3): first the agent that will work in the lakehouse and the policies that gate it (Chapter 3), then ten layers of the stack (Chapters 4 to 13), one working system.
-
-| # | Chapter | The layer you build | The payoff |
-|---|---------|--------------------|------------|
-| 1 | **Foundations** | *(the map)* | Understand what a lakehouse is, and make the handful of architecture decisions that are expensive to get wrong before you write any code. |
-| 2 | **Setup** | Your environment, from scratch | Install the tools, lay out the project, and learn the container, networking, and secrets model the whole stack runs on. |
-| 3 | **Agentic data engineering** | An SDP agent on a local model, and its policies | Define the agent that writes pipelines in your lakehouse (Omnigent + Ollama + MCP tools) and the policies that ALLOW, DENY, or ASK about every tool call, tested before it can touch anything. |
-| 4 | **Storage** | Object store + open table format | Stand up your first real service (SeaweedFS), and learn how loose Parquet files become a *table*. Meet Iceberg. |
-| 5 | **Compute** | Apache Spark, via **Spark Connect** | Build the course's Spark image and drive a real Spark cluster from a tiny client over `sc://`, no heavyweight driver bolted to your app. |
-| 5.5 | **Iceberg for Spark 4.3** | The Iceberg runtime, built from source | A short, temporary chapter: no Iceberg release ships a Spark 4.3 runtime yet, so you build it from a pinned commit. It goes away when the release does. |
-| 6 | **Tables & Catalog** | Iceberg through **Unity Catalog OSS** | Create a real transactional table, evolve its schema, then *time-travel* and roll back a mistake. ✨ |
-| 7 | **Ingestion** | Landing raw data → **Bronze** | Load data the modern way (ELT), and make it safely re-runnable so retries never duplicate rows. |
-| 8 | **Transformation** | The **medallion** with Spark Declarative Pipelines | Declare Bronze→Silver→Gold and let the engine figure out the order, the refresh, and the quality checks. |
-| 9 | **Streaming** | Kafka → Structured Streaming → Bronze | The *same* table, now fed in real time, with watermarks and exactly-once dedup done honestly. |
-| 10 | **Orchestration** | An **Airflow** DAG | Put the pipeline on a schedule with retries and backfills, so it runs itself while you sleep. |
-| 11 | **Serving** | One open catalog, many engines | Query the *exact same* tables from a totally different engine, no copies, no exports. This is the payoff of "open." |
-| 12 | **AI** | Train + track a model with **MLflow** | Feed your clean Gold tables to a model, and log *which snapshot* trained it, so the result is fully reproducible. |
-| 13 | **Agents** | An LLM that *operates* the lakehouse | Ask, in plain English, for the pipeline to run, and watch an agent actually do it. 🤖 |
-| 14 | **Deploy & Teardown** | Cloud path + a clean exit | Tour the road to the cloud (without a bill), then tear it all down and see where to go next. |
-
-**The stack you'll come out knowing:** Omnigent and Ollama (the agent) · SeaweedFS · Apache Spark (Spark Connect) · Apache Iceberg · Unity Catalog OSS · Apache Kafka · Apache Airflow · Spark Declarative Pipelines · MLflow.
-
-And here's the quiet secret: **these are the same open tools the big paid platforms are built on.** Learn them here, directly, and moving to something like Databricks or EMR later is a small step. You'll already know what's under the hood.
-
----
-
-## What's in this repo
+All services run locally. Each chapter leaves behind a working layer that the next chapter must use, so architecture becomes cause and effect rather than a list of product names.
 
 ```text
-lakehouse-masterclass/
-├── README.md          ← you are here 👋
-├── COURSE.md          ← chapter → commands → checkpoint quick reference
-├── LICENSE            ← project license
-├── banner.jpg         ← course banner image
-└── textbook/          ← the course itself
-    ├── README.md          the table of contents
-    ├── chapters/          ch01 … ch13, one Markdown file per chapter
-    └── figures/           the diagrams (lots of them, this course is visual)
+events -> Kafka -> Spark -> Bronze -> Silver -> Gold
+                    |         Apache Iceberg        |
+                    +------ Unity Catalog OSS ------+
+                                      |
+                         Airflow · DuckDB · MLflow
+                                      |
+                            policy-constrained agent
 ```
 
-Every chapter is built the same way: a quick "here's what you'll build," clear objectives, each concept explained *right* before you use it, copy-pasteable build steps with the output you should expect, a checkpoint to prove the layer works, and a recap. Heavy on diagrams, light on jargon.
+## 🎯 Audience and requirements
 
----
+The course assumes working knowledge of Python, SQL, and a command-line shell. Prior Spark, Kafka, Docker, or distributed-systems experience is not required.
 
-## Ready?
+The full stack requires:
 
-Grab a coffee, open a terminal, and head to **[the first chapter →](textbook/chapters/ch01-foundations.md)**.
+- a machine with approximately 16 GB of memory;
+- Docker with Compose v2;
+- Python 3.12; and
+- Git and a POSIX-compatible shell.
 
-By the end, you won't just *know about* data lakehouses. You'll have built one. 🚀
+The measured container footprint after a pipeline run is approximately 4.5 GB, with higher short-lived peaks while jobs run. An 8 GB machine can run the course with the Spark worker capped and later services stopped when they are not in use; Chapter 5 describes the resource settings.
 
-## License
+## 🧭 How to use the course
 
-See [`LICENSE`](LICENSE).
+Read the chapters in order. Each chapter introduces one architectural layer, adds it to the local system, and ends with a checkpoint that verifies the result.
+
+- [Textbook contents](textbook/README.md)
+- [Command and checkpoint reference](COURSE.md)
+- [Published course](https://open-lakehouse.github.io/lakehouse-masterclass/)
+
+The chapters contain every required file in full. A separate starter repository is not required.
+
+## 🗺️ Curriculum
+
+| Chapter | Layer | Result |
+|---|---|---|
+| 1. Foundations | Architecture | Define the system boundaries and the decisions that constrain later layers. |
+| 2. Setup | Local environment | Establish the project, container, network, and secret model. |
+| 3. Agentic data engineering | Agent and policies | Run a local SDP agent with tested `ALLOW`, `DENY`, and `ASK` controls. |
+| 4. Storage | Object storage and table format | Store data through an S3-compatible API and introduce Iceberg tables. |
+| 5. Compute | Apache Spark and Spark Connect | Build a Spark image and execute work through a remote Spark Connect session. |
+| 5.5. Iceberg for Spark 4.3 | Temporary compatibility build | Build the pinned Iceberg runtime required until an upstream Spark 4.3 artifact is released. |
+| 6. Tables and Catalog | Iceberg and Unity Catalog OSS | Create, evolve, time-travel, and restore a transactional table. |
+| 7. Ingestion | Raw data to Bronze | Build an idempotent landing and ingestion path. |
+| 8. Transformation | Medallion architecture | Produce Silver and Gold tables with Spark Declarative Pipelines. |
+| 9. Streaming | Kafka and Structured Streaming | Feed the Bronze layer continuously with restartable, deduplicated processing. |
+| 10. Orchestration | Apache Airflow | Schedule, retry, and backfill the pipeline. |
+| 11. Serving | DuckDB | Query the same catalog and tables from a second engine. |
+| 12. AI | MLflow | Train and track a model against an identifiable Gold-table snapshot. |
+| 13. Agents | Lakehouse operations | Operate tested workflows through an agent and constrained tools. |
+| 14. Deploy and Teardown | Operations | Map the local design to cloud services and remove the stack cleanly. |
+
+## 📂 Repository layout
+
+| Path | Purpose |
+|---|---|
+| `textbook/` | Course chapters and figures |
+| `COURSE.md` | Chapter commands and verification checkpoints |
+| `mkdocs.yml` | Published site configuration and navigation |
+| `requirements-docs.txt` | Documentation build dependencies |
+
+## 📚 Build the documentation
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements-docs.txt
+.venv/bin/mkdocs serve
+```
+
+Open <http://127.0.0.1:8000> after MkDocs starts.
+
+## 🚧 Project status
+
+The textbook is complete through Chapter 14. Chapter 5.5 is temporary and documents the pinned source build needed while Apache Iceberg does not publish a Spark 4.3 runtime.
+
+## 📜 License
+
+See [LICENSE](LICENSE).
